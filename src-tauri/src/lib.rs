@@ -76,6 +76,18 @@ fn get_cleanable_files(state: State<AppState>) -> Result<Vec<CleanableFile>, Str
 }
 
 #[tauri::command]
+fn get_auto_selectable_files(state: State<AppState>) -> Result<Vec<CleanableFile>, String> {
+    let cleaner = state.file_cleaner.lock().map_err(|e| e.to_string())?;
+    Ok(cleaner.get_auto_selectable_files())
+}
+
+#[tauri::command]
+fn get_files_by_safety(state: State<AppState>, min_safety_score: u8) -> Result<Vec<CleanableFile>, String> {
+    let cleaner = state.file_cleaner.lock().map_err(|e| e.to_string())?;
+    Ok(cleaner.get_files_by_safety(min_safety_score))
+}
+
+#[tauri::command]
 fn clean_files(state: State<AppState>, file_paths: Vec<String>) -> Result<(u64, usize), String> {
     let cleaner = state.file_cleaner.lock().map_err(|e| e.to_string())?;
     cleaner.clean_files(file_paths)
@@ -164,6 +176,8 @@ pub fn run() {
             kill_process,
             scan_cleanable_files,
             get_cleanable_files,
+            get_auto_selectable_files,
+            get_files_by_safety,
             clean_files,
             empty_trash,
             optimize_memory,

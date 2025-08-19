@@ -1,5 +1,104 @@
 const { invoke } = window.__TAURI__.core;
 
+// Unified user confirmation helper that prefers Tauri's dialog
+async function userConfirm(message, { title = 'Confirm', kind = 'warning' } = {}) {
+    try {
+        const tauri = window.__TAURI__;
+        if (tauri && tauri.dialog) {
+            if (typeof tauri.dialog.ask === 'function') {
+                const result = await tauri.dialog.ask(message, { title, kind });
+                return !!result;
+            }
+            // Avoid tauri.dialog.confirm in Tauri v2 for boolean decisions (may resolve void)
+        }
+    } catch (e) {
+        console.warn('Tauri dialog unavailable, falling back to window.confirm:', e);
+    }
+    // Fallback to an inline modal instead of window.confirm (WebView can block it)
+    return await inlineConfirm(message, { title, kind });
+}
+
+function inlineConfirm(message, { title = 'Confirm', kind = 'warning' } = {}) {
+    return new Promise(resolve => {
+        // Avoid multiple overlays
+        if (document.getElementById('inline-confirm-overlay')) {
+            resolve(false);
+            return;
+        }
+
+        const overlay = document.createElement('div');
+        overlay.id = 'inline-confirm-overlay';
+        overlay.style.position = 'fixed';
+        overlay.style.inset = '0';
+        overlay.style.background = 'rgba(0,0,0,0.5)';
+        overlay.style.display = 'flex';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.zIndex = '9999';
+
+        const card = document.createElement('div');
+        card.style.background = '#1c1c1e';
+        card.style.color = '#fff';
+        card.style.padding = '20px';
+        card.style.borderRadius = '12px';
+        card.style.maxWidth = '480px';
+        card.style.width = 'calc(100% - 40px)';
+        card.style.boxShadow = '0 10px 30px rgba(0,0,0,0.3)';
+
+        const heading = document.createElement('h4');
+        heading.textContent = title || 'Confirm';
+        heading.style.margin = '0 0 8px';
+        heading.style.fontSize = '16px';
+
+        const body = document.createElement('p');
+        body.textContent = '';
+        body.style.margin = '0 0 16px';
+        body.style.whiteSpace = 'pre-line';
+        body.textContent = message;
+
+        const actions = document.createElement('div');
+        actions.style.display = 'flex';
+        actions.style.gap = '8px';
+        actions.style.justifyContent = 'flex-end';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.className = 'btn-secondary';
+
+        const okBtn = document.createElement('button');
+        okBtn.textContent = 'OK';
+        okBtn.className = kind === 'warning' ? 'btn-danger' : 'btn-primary';
+
+        const cleanup = () => {
+            document.removeEventListener('keydown', onKey);
+            overlay.remove();
+        };
+
+        const onCancel = () => { cleanup(); resolve(false); };
+        const onOk = () => { cleanup(); resolve(true); };
+
+        const onKey = (e) => {
+            if (e.key === 'Escape') onCancel();
+            if (e.key === 'Enter') onOk();
+        };
+
+        cancelBtn.addEventListener('click', onCancel);
+        okBtn.addEventListener('click', onOk);
+        document.addEventListener('keydown', onKey);
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(okBtn);
+        card.appendChild(heading);
+        card.appendChild(body);
+        card.appendChild(actions);
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+
+        // Focus OK for quick keyboard confirm
+        setTimeout(() => okBtn.focus(), 0);
+    });
+}
+
 // Utility functions
 function formatBytes(bytes) {
     if (bytes === 0) return '0 Bytes';
@@ -70,6 +169,9 @@ function setupTabNavigation() {
                             console.log('Memory tab active - Deep clean button visible:', deepCleanBtn.offsetParent !== null);
                         }
                     }, 100);
+                    break;
+                case 'storage':
+                    // Storage tab doesn't need auto-load, user will scan manually
                     break;
                 case 'processes':
                     loadProcesses();
@@ -189,6 +291,9 @@ async function loadMemoryInfo() {
 
 // Storage cleaner functions
 let cleanableFiles = [];
+let lastReport = null;
+let showAdvanced = false;
+let currentCategoryFilter = null;
 
 async function scanForCleanableFiles() {
     const scanProgress = document.getElementById('scan-progress');
@@ -201,6 +306,7 @@ async function scanForCleanableFiles() {
     
     try {
         const report = await invoke('scan_cleanable_files');
+        lastReport = report;
         cleanableFiles = await invoke('get_cleanable_files');
         
         // Update summary
@@ -208,21 +314,10 @@ async function scanForCleanableFiles() {
         document.getElementById('files-found').textContent = report.files_count;
         
         // Display categories
-        const categoriesList = document.getElementById('categories-list');
-        categoriesList.innerHTML = '';
-        
-        report.categories.forEach(category => {
-            const categoryCard = document.createElement('div');
-            categoryCard.className = 'category-card';
-            categoryCard.innerHTML = `
-                <div class="category-name">${category.name}</div>
-                <div class="category-size">${formatBytes(category.size)} (${category.count} files)</div>
-            `;
-            categoryCard.addEventListener('click', () => filterFilesByCategory(category.name));
-            categoriesList.appendChild(categoryCard);
-        });
+        renderCategories();
         
         // Display files
+        currentCategoryFilter = null;
         displayFiles(cleanableFiles);
         
         scanProgress.style.display = 'none';
@@ -237,64 +332,292 @@ async function scanForCleanableFiles() {
     }
 }
 
+function renderCategories() {
+    if (!lastReport) return;
+    const categoriesList = document.getElementById('categories-list');
+    categoriesList.innerHTML = '';
+    const advancedSet = new Set((lastReport.advanced_categories || []).map(x => x.toLowerCase()));
+
+    // Build a lookup for existing categories
+    const present = new Map();
+    lastReport.categories.forEach(c => present.set(c.name.toLowerCase(), c));
+
+    // First render non-advanced (always), then advanced (only if toggled)
+    lastReport.categories.forEach(category => {
+        const isAdvanced = advancedSet.has(category.name.toLowerCase()) || /\(advanced\)/i.test(category.name);
+        if (!isAdvanced) {
+            const card = createCategoryCard(category.name, category.size, category.count, false);
+            categoriesList.appendChild(card);
+        }
+    });
+
+    if (showAdvanced) {
+        // Render advanced that have items from the report
+        lastReport.categories.forEach(category => {
+            const isAdvanced = advancedSet.has(category.name.toLowerCase()) || /\(advanced\)/i.test(category.name);
+            if (isAdvanced) {
+                const card = createCategoryCard(category.name, category.size, category.count, true);
+                categoriesList.appendChild(card);
+            }
+        });
+
+        // Also render advanced categories that exist in rules but had zero results
+        (lastReport.advanced_categories || []).forEach(name => {
+            if (!present.has(name.toLowerCase())) {
+                const card = createCategoryCard(name, 0, 0, true);
+                categoriesList.appendChild(card);
+            }
+        });
+    }
+}
+
+function createCategoryCard(name, size, count, isAdvanced = false) {
+    const categoryCard = document.createElement('div');
+    categoryCard.className = 'category-card';
+    categoryCard.dataset.name = name;
+    const badge = isAdvanced ? '<span class="badge badge-advanced">Advanced</span>' : '';
+    categoryCard.innerHTML = `
+        <div class="category-name">${name} ${badge}</div>
+        <div class="category-size">${formatBytes(size)} (${count} files)</div>
+    `;
+    categoryCard.addEventListener('click', () => filterFilesByCategory(name));
+    return categoryCard;
+}
+
 function displayFiles(files) {
     const filesList = document.getElementById('files-list');
     filesList.innerHTML = '';
     
-    files.slice(0, 100).forEach((file, index) => {
+    // Sort files by safety score (highest first) and size (largest first)
+    const sortedFiles = [...files].sort((a, b) => {
+        if (b.safety_score !== a.safety_score) {
+            return b.safety_score - a.safety_score;
+        }
+        return b.size - a.size;
+    });
+    
+    if (sortedFiles.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = currentCategoryFilter ? 'No files in this category' : 'No files found';
+        filesList.appendChild(empty);
+        updateSelectionInfo();
+        return;
+    }
+
+    sortedFiles.slice(0, 100).forEach((file, index) => {
         const fileItem = document.createElement('div');
         fileItem.className = 'file-item';
+        
+        // Determine safety badge color
+        let safetyClass = 'safety-low';
+        let safetyText = 'Low';
+        if (file.safety_score >= 95) {
+            safetyClass = 'safety-very-high';
+            safetyText = 'Very Safe';
+        } else if (file.safety_score >= 80) {
+            safetyClass = 'safety-high';
+            safetyText = 'Safe';
+        } else if (file.safety_score >= 60) {
+            safetyClass = 'safety-medium';
+            safetyText = 'Review';
+        }
+        
         fileItem.innerHTML = `
             <input type="checkbox" id="file-${index}" value="${file.path}" 
-                   ${file.safe_to_delete ? '' : 'disabled'}>
+                   data-size="${file.size}"
+                   ${file.safe_to_delete ? '' : 'disabled'}
+                   ${file.auto_select ? 'checked' : ''}>
             <div class="file-info">
-                <div class="file-path">${file.path}</div>
-                <div class="file-size">${formatBytes(file.size)} - ${file.description}</div>
+                <div class="file-header">
+                    <span class="file-path">${file.path}</span>
+                    <span class="safety-badge ${safetyClass}" title="Safety Score: ${file.safety_score}/100">
+                        ${safetyText} (${file.safety_score})
+                    </span>
+                </div>
+                <div class="file-details">
+                    <span class="file-size">${formatBytes(file.size)}</span>
+                    <span class="file-category">${file.category}</span>
+                    <span class="file-description">${file.description}</span>
+                </div>
             </div>
         `;
         filesList.appendChild(fileItem);
     });
+    
+    // Update selection count after displaying files
+    updateSelectionInfo();
 }
 
 function filterFilesByCategory(categoryName) {
+    currentCategoryFilter = categoryName;
     const filtered = cleanableFiles.filter(file => file.category === categoryName);
     displayFiles(filtered);
     
     // Update category selection
     document.querySelectorAll('.category-card').forEach(card => {
-        if (card.querySelector('.category-name').textContent === categoryName) {
+        if ((card.dataset && card.dataset.name) === categoryName) {
             card.classList.add('selected');
         } else {
             card.classList.remove('selected');
         }
     });
+
+    // Show category action bar
+    const actions = document.getElementById('category-actions');
+    const current = document.getElementById('current-category-name');
+    if (actions && current) {
+        current.textContent = categoryName;
+        actions.style.display = 'flex';
+    }
+}
+
+async function cleanCategory(categoryName) {
+    const files = cleanableFiles.filter(f => f.category === categoryName && f.safe_to_delete);
+    if (files.length === 0) {
+        showNotification('No safe files found in this category', 'warning');
+        return;
+    }
+    const totalSize = files.reduce((acc, f) => acc + (f.size || 0), 0);
+    const confirmed = await userConfirm(
+        `Clean ${files.length} files in "${categoryName}"?\n\nThis will free approximately ${formatBytes(totalSize)}`,
+        { title: 'Clean Category', kind: 'warning' }
+    );
+    if (!confirmed) return;
+
+    try {
+        const [freedBytes, filesDeleted] = await invoke('clean_files', { filePaths: files.map(f => f.path) });
+        showNotification(`Cleaned ${filesDeleted} files, freed ${formatBytes(freedBytes)}`, 'success');
+        await scanForCleanableFiles();
+        // Reset category filter
+        const actions = document.getElementById('category-actions');
+        if (actions) actions.style.display = 'none';
+        currentCategoryFilter = null;
+    } catch (error) {
+        showNotification(`Failed to clean category: ${error}`, 'error');
+    }
 }
 
 async function cleanSelectedFiles() {
+    console.log('cleanSelectedFiles function called');
+    
     const selectedFiles = [];
-    document.querySelectorAll('#files-list input[type="checkbox"]:checked').forEach(checkbox => {
+    let totalSize = 0;
+    const checkboxes = document.querySelectorAll('#files-list input[type="checkbox"]:checked');
+    
+    console.log(`Found ${checkboxes.length} selected checkboxes`);
+    
+    checkboxes.forEach(checkbox => {
         selectedFiles.push(checkbox.value);
+        totalSize += parseInt(checkbox.dataset.size || 0);
     });
+    
+    console.log(`Selected files: ${selectedFiles.length}, Total size: ${totalSize}`);
     
     if (selectedFiles.length === 0) {
         showNotification('No files selected for cleaning', 'error');
         return;
     }
     
-    if (!confirm(`Are you sure you want to delete ${selectedFiles.length} files?`)) {
+    const confirmed = await userConfirm(
+        `Are you sure you want to delete ${selectedFiles.length} files?\n\nThis will free approximately ${formatBytes(totalSize)}`,
+        { title: 'Confirm Clean', kind: 'warning' }
+    );
+    if (!confirmed) {
+        console.log('User cancelled file cleaning');
         return;
     }
     
+    console.log('User confirmed, starting file cleaning...');
+    
     try {
+        showNotification('Cleaning selected files...', 'success');
         const [freedBytes, filesDeleted] = await invoke('clean_files', { filePaths: selectedFiles });
+        console.log(`Clean complete: ${filesDeleted} files deleted, ${freedBytes} bytes freed`);
         showNotification(`Cleaned ${filesDeleted} files, freed ${formatBytes(freedBytes)}`, 'success');
         
         // Rescan after cleaning
         await scanForCleanableFiles();
     } catch (error) {
         console.error('Error cleaning files:', error);
-        showNotification('Failed to clean selected files', 'error');
+        showNotification(`Failed to clean selected files: ${error}`, 'error');
     }
+}
+
+function updateSelectionInfo() {
+    const checkboxes = document.querySelectorAll('#files-list input[type="checkbox"]:checked');
+    let totalSize = 0;
+    let count = 0;
+    
+    checkboxes.forEach(checkbox => {
+        count++;
+        totalSize += parseInt(checkbox.dataset.size || 0);
+    });
+    
+    document.getElementById('selected-count').textContent = `${count} files selected`;
+    document.getElementById('selected-size').textContent = formatBytes(totalSize);
+}
+
+async function autoSelectSafeFiles() {
+    try {
+        const autoSelectFiles = await invoke('get_auto_selectable_files');
+        
+        // Clear current selection
+        document.querySelectorAll('#files-list input[type="checkbox"]').forEach(checkbox => {
+            checkbox.checked = false;
+        });
+        
+        // Select auto-selectable files
+        let selectedCount = 0;
+        autoSelectFiles.forEach(file => {
+            const checkbox = document.querySelector(`#files-list input[value="${CSS.escape(file.path)}"]`);
+            if (checkbox && !checkbox.disabled) {
+                checkbox.checked = true;
+                selectedCount++;
+            }
+        });
+        
+        updateSelectionInfo();
+        showNotification(`Auto-selected ${selectedCount} safe files`, 'success');
+    } catch (error) {
+        console.error('Error auto-selecting files:', error);
+        showNotification('Failed to auto-select files', 'error');
+    }
+}
+
+async function selectBySafety(minScore = 95) {
+    try {
+        const safeFiles = await invoke('get_files_by_safety', { minSafetyScore: minScore });
+        
+        // Clear current selection
+        document.querySelectorAll('#files-list input[type="checkbox"]').forEach(checkbox => {
+            checkbox.checked = false;
+        });
+        
+        // Select files by safety score
+        let selectedCount = 0;
+        safeFiles.forEach(file => {
+            const checkbox = document.querySelector(`#files-list input[value="${CSS.escape(file.path)}"]`);
+            if (checkbox && !checkbox.disabled) {
+                checkbox.checked = true;
+                selectedCount++;
+            }
+        });
+        
+        updateSelectionInfo();
+        showNotification(`Selected ${selectedCount} files with safety score ≥ ${minScore}`, 'success');
+    } catch (error) {
+        console.error('Error selecting files by safety:', error);
+        showNotification('Failed to select files by safety', 'error');
+    }
+}
+
+function clearFileSelection() {
+    document.querySelectorAll('#files-list input[type="checkbox"]').forEach(checkbox => {
+        checkbox.checked = false;
+    });
+    updateSelectionInfo();
+    showNotification('Selection cleared', 'success');
 }
 
 // Process management functions
@@ -374,7 +697,7 @@ const row = document.createElement('tr');
             const pid = parseInt(btn.dataset.pid);
             const name = btn.dataset.name;
 
-            if (confirm(`Are you sure you want to end the process "${name}" (PID: ${pid})?`)) {
+            if (await userConfirm(`Are you sure you want to end the process "${name}" (PID: ${pid})?`, { title: 'Confirm End Task', kind: 'warning' })) {
                 try {
                     await invoke('kill_process', { pid });
                     showNotification(`Process ${name} terminated`, 'success');
@@ -530,10 +853,107 @@ function setupEventListeners() {
         scanFilesBtn.addEventListener('click', scanForCleanableFiles);
     }
     
+    const emptyTrashBtn = document.getElementById('empty-trash');
+    if (emptyTrashBtn) {
+        emptyTrashBtn.addEventListener('click', async () => {
+            const confirmed = await userConfirm('Empty the Trash now?\n\nThis permanently deletes all items in your Trash.', { title: 'Empty Trash', kind: 'warning' });
+            if (!confirmed) return;
+            try {
+                const [freed, count] = await invoke('empty_trash');
+                showNotification(`Emptied Trash: removed ${count} items, freed ${formatBytes(freed)}`, 'success');
+                // Refresh scan if results are visible
+                const cleaningReport = document.getElementById('cleaning-report');
+                if (cleaningReport && cleaningReport.style.display !== 'none') {
+                    await scanForCleanableFiles();
+                }
+            } catch (e) {
+                console.error('Empty trash failed:', e);
+                showNotification('Failed to empty Trash', 'error');
+            }
+        });
+    }
+    
+    const toggleAdvanced = document.getElementById('toggle-advanced');
+    if (toggleAdvanced) {
+        // Initialize from localStorage
+        const stored = localStorage.getItem('showAdvanced');
+        showAdvanced = stored === 'true';
+        toggleAdvanced.checked = showAdvanced;
+
+        toggleAdvanced.addEventListener('change', (e) => {
+            showAdvanced = !!e.target.checked;
+            localStorage.setItem('showAdvanced', showAdvanced ? 'true' : 'false');
+            renderCategories();
+            // If current filter is advanced and we hid it, clear filter
+            if (!showAdvanced && currentCategoryFilter) {
+                const advSet = new Set(((lastReport && lastReport.advanced_categories) || []).map(x => x.toLowerCase()));
+                if (advSet.has(currentCategoryFilter.toLowerCase()) || /(advanced)/i.test(currentCategoryFilter)) {
+                    currentCategoryFilter = null;
+                    displayFiles(cleanableFiles);
+                    const actions = document.getElementById('category-actions');
+                    if (actions) actions.style.display = 'none';
+                }
+            }
+        });
+    }
+    
     const cleanSelectedBtn = document.getElementById('clean-selected');
     if (cleanSelectedBtn) {
-        cleanSelectedBtn.addEventListener('click', cleanSelectedFiles);
+        console.log('Setting up clean-selected button listener');
+        // Mark listener attached so the delayed fallback doesn't double-bind
+        cleanSelectedBtn.setAttribute('data-listener-attached', 'true');
+        cleanSelectedBtn.addEventListener('click', (e) => {
+            console.log('Clean selected button clicked via direct listener');
+            e.preventDefault();
+            e.stopPropagation();
+            cleanSelectedFiles();
+        });
+    } else {
+        console.error('Clean selected button not found!')
     }
+    
+    // Smart selection buttons
+    const autoSelectBtn = document.getElementById('auto-select-safe');
+    if (autoSelectBtn) {
+        autoSelectBtn.addEventListener('click', autoSelectSafeFiles);
+    }
+    
+    const selectBySafetyBtn = document.getElementById('select-by-safety');
+    if (selectBySafetyBtn) {
+        selectBySafetyBtn.addEventListener('click', () => selectBySafety(95));
+    }
+    
+    const clearSelectionBtn = document.getElementById('clear-selection');
+    if (clearSelectionBtn) {
+        clearSelectionBtn.addEventListener('click', clearFileSelection);
+    }
+
+    // Category actions
+    const clearCategoryBtn = document.getElementById('clear-category-filter');
+    if (clearCategoryBtn) {
+        clearCategoryBtn.addEventListener('click', () => {
+            currentCategoryFilter = null;
+            displayFiles(cleanableFiles);
+            const actions = document.getElementById('category-actions');
+            if (actions) actions.style.display = 'none';
+            document.querySelectorAll('.category-card').forEach(c => c.classList.remove('selected'));
+        });
+    }
+    const cleanThisCategoryBtn = document.getElementById('clean-this-category');
+    if (cleanThisCategoryBtn) {
+        cleanThisCategoryBtn.addEventListener('click', async () => {
+            if (currentCategoryFilter) {
+                await cleanCategory(currentCategoryFilter);
+            }
+        });
+    }
+    
+    // Add change listener for file checkboxes using event delegation
+    document.addEventListener('change', (event) => {
+        if (event.target.matches('#files-list input[type="checkbox"]')) {
+            updateSelectionInfo();
+        }
+    });
     
     // Notification close button
     const notificationClose = document.querySelector('.notification-close');
@@ -552,7 +972,7 @@ window.addEventListener('DOMContentLoaded', () => {
     setupTabNavigation();
     console.log('Tab navigation setup complete');
     
-    // Use event delegation for ALL button clicks (works with dynamic content)
+    // Use event delegation ONLY for optimize-memory button
     document.body.addEventListener('click', async (event) => {
         // Guard against non-Element targets (text nodes in WebKit)
         const tgt = event.target;
@@ -562,18 +982,15 @@ window.addEventListener('DOMContentLoaded', () => {
         const button = tgt.closest('button');
         if (!button) return;
         
+        // Debug log for all buttons
         console.log('Button clicked with ID:', button.id);
         
-        // Skip deep-clean-memory as it has its own direct listener
-        if (button.id === 'deep-clean-memory') {
-            console.log('Deep clean button - handled by direct listener');
-            return;
-        }
-        
-        // Handle optimize memory button
+        // ONLY intercept and handle optimize-memory button
+        // All other buttons should work with their direct listeners
         if (button.id === 'optimize-memory') {
             console.log('Optimize memory button handler triggered!');
             event.preventDefault();
+            event.stopPropagation();
             
             const useAdmin = confirm(
                 'Memory Optimization Options:\n\n' +
@@ -628,7 +1045,21 @@ window.addEventListener('DOMContentLoaded', () => {
     
     // Setup all event listeners
     setupEventListeners();
-    console.log('Event delegation attached');
+    console.log('Event listeners setup complete');
+    
+    // Add a fallback setup after a short delay to ensure DOM is ready
+    setTimeout(() => {
+        const cleanBtn = document.getElementById('clean-selected');
+        if (cleanBtn && !cleanBtn.hasAttribute('data-listener-attached')) {
+            console.log('Attaching fallback listener to clean-selected button');
+            cleanBtn.setAttribute('data-listener-attached', 'true');
+            cleanBtn.onclick = (e) => {
+                console.log('Clean button clicked via onclick handler');
+                e.preventDefault();
+                cleanSelectedFiles();
+            };
+        }
+    }, 500);
     
     // Debug: Check if buttons exist in DOM and ensure they're properly styled
     setTimeout(() => {

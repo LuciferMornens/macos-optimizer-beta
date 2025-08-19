@@ -459,6 +459,12 @@ body {
     padding: 10px;
 }
 
+.empty-state {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
 .file-item {
     display: flex;
     align-items: center;
@@ -477,17 +483,119 @@ body {
 
 .file-info {
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.file-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
 }
 
 .file-path {
     font-size: 14px;
-    margin-bottom: 4px;
     word-break: break-all;
+    flex: 1;
+}
+
+.file-details {
+    display: flex;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
 }
 
 .file-size {
-    font-size: 12px;
+    color: var(--accent-primary);
+    font-weight: 500;
+}
+
+.file-category {
     color: var(--text-secondary);
+}
+
+.file-description {
+    font-style: italic;
+}
+
+/* Smart Selection */
+.smart-selection {
+    background: var(--bg-secondary);
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+    border: 1px solid var(--border-color);
+}
+
+.smart-selection h4 {
+    margin-bottom: 15px;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.selection-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.selection-info {
+    display: flex;
+    gap: 20px;
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.selection-info span {
+    display: flex;
+    align-items: center;
+}
+
+#selected-count {
+    color: var(--accent-primary);
+    font-weight: 500;
+}
+
+#selected-size {
+    color: var(--accent-success);
+    font-weight: 500;
+}
+
+/* Safety Badge */
+.safety-badge {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.safety-very-high {
+    background: rgba(52, 199, 89, 0.2);
+    color: var(--accent-success);
+    border: 1px solid rgba(52, 199, 89, 0.3);
+}
+
+.safety-high {
+    background: rgba(0, 122, 255, 0.2);
+    color: var(--accent-primary);
+    border: 1px solid rgba(0, 122, 255, 0.3);
+}
+
+.safety-medium {
+    background: rgba(255, 149, 0, 0.2);
+    color: var(--accent-warning);
+    border: 1px solid rgba(255, 149, 0, 0.3);
+}
+
+.safety-low {
+    background: rgba(255, 59, 48, 0.2);
+    color: var(--accent-danger);
+    border: 1px solid rgba(255, 59, 48, 0.3);
 }
 
 /* Processes Tab */
@@ -615,6 +723,22 @@ body {
     cursor: pointer;
     padding: 0;
     margin-left: 15px;
+}
+
+/* Badges */
+.badge {
+    display: inline-block;
+    padding: 2px 6px;
+    font-size: 10px;
+    border-radius: 6px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.badge-advanced {
+    background: rgba(255, 149, 0, 0.15);
+    color: var(--accent-warning);
+    border: 1px solid rgba(255, 149, 0, 0.3);
 }
 
 /* Scrollbar Styling */

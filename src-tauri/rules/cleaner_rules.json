@@ -1,0 +1,213 @@
+{
+  "categories": [
+    {
+      "name": "Incomplete Downloads (2d+)",
+      "paths": ["~/Downloads"],
+      "safe": true,
+      "max_depth": 2,
+      "min_age_days": 2,
+      "extensions": ["crdownload", "download", "part", "partial", "tmp", "aria2"]
+    },
+    {
+      "name": "Browser Cache",
+      "paths": [
+        "~/Library/Caches/com.apple.Safari",
+        "~/Library/Caches/Google/Chrome",
+        "~/Library/Application Support/Google/Chrome/Default/Service Worker/CacheStorage",
+        "~/Library/Caches/Microsoft Edge",
+        "~/Library/Application Support/Microsoft Edge/Default/Service Worker/CacheStorage",
+        "~/Library/Caches/Firefox"
+      ],
+      "safe": true,
+      "max_depth": 5
+    },
+    {
+      "name": "User Cache",
+      "paths": ["~/Library/Caches"],
+      "safe": true,
+      "max_depth": 4,
+      "excludes": [
+        "com.apple.Safari",
+        "Google/Chrome",
+        "Microsoft Edge",
+        "Firefox",
+        "QuickLook.thumbnailcache"
+      ]
+    },
+    {
+      "name": "QuickLook Cache",
+      "paths": ["~/Library/Caches/com.apple.QuickLook.thumbnailcache"],
+      "safe": true,
+      "max_depth": 3
+    },
+    {
+      "name": "App Store Cache",
+      "paths": ["~/Library/Caches/com.apple.appstore"],
+      "safe": true,
+      "max_depth": 3
+    },
+    {
+      "name": "Music Cache",
+      "paths": ["~/Library/Caches/com.apple.Music"],
+      "safe": true,
+      "max_depth": 3
+    },
+    {
+      "name": "Temporary Files",
+      "paths": [
+        "/tmp",
+        "/var/tmp",
+        "/private/tmp",
+        "/private/var/tmp",
+        "~/Library/Caches/TemporaryItems"
+      ],
+      "safe": true,
+      "max_depth": 3,
+      "min_age_days": 7
+    },
+    {
+      "name": "Saved Application State (30d+)",
+      "paths": ["~/Library/Saved Application State"],
+      "safe": true,
+      "max_depth": 2,
+      "min_age_days": 30
+    },
+    {
+      "name": "Crash Reports (30d+)",
+      "paths": ["~/Library/Logs/DiagnosticReports"],
+      "safe": true,
+      "max_depth": 3,
+      "min_age_days": 30
+    },
+    {
+      "name": "System Crash Reports (30d+, Advanced)",
+      "paths": ["/Library/Logs/DiagnosticReports"],
+      "safe": true,
+      "advanced": true,
+      "max_depth": 3,
+      "min_age_days": 30
+    },
+    {
+      "name": "User Logs (30d+)",
+      "paths": ["~/Library/Logs"],
+      "safe": true,
+      "max_depth": 4,
+      "min_age_days": 30
+    },
+    {
+      "name": "System Logs (30d+, Advanced)",
+      "paths": ["/Library/Logs", "/var/log"],
+      "safe": true,
+      "advanced": true,
+      "max_depth": 3,
+      "min_age_days": 30
+    },
+    {
+      "name": "Trash",
+      "paths": ["~/.Trash"],
+      "safe": true,
+      "max_depth": 3
+    },
+    {
+      "name": "Dropbox Cache",
+      "paths": ["~/Dropbox/.dropbox.cache"],
+      "safe": true,
+      "max_depth": 4
+    },
+    {
+      "name": "Old Downloads (90d+)",
+      "paths": ["~/Downloads"],
+      "safe": false,
+      "max_depth": 3,
+      "min_age_days": 90
+    },
+    {
+      "name": "Old Installers (30d+)",
+      "paths": ["~/Downloads"],
+      "safe": true,
+      "max_depth": 2,
+      "min_age_days": 30,
+      "extensions": ["dmg", "pkg", "zip"]
+    },
+    {
+      "name": "Messages Attachments (90d+, Review)",
+      "paths": ["~/Library/Messages/Attachments"],
+      "safe": true,
+      "max_depth": 3,
+      "min_age_days": 90
+    },
+    {
+      "name": "iOS Backups (Advanced)",
+      "paths": ["~/Library/Application Support/MobileSync/Backup"],
+      "safe": true,
+      "advanced": true,
+      "max_depth": 2
+    },
+    {
+      "name": "iOS Updates (Advanced)",
+      "paths": [
+        "~/Library/iTunes/iPhone Software Updates",
+        "~/Library/iTunes/iPad Software Updates"
+      ],
+      "safe": true,
+      "advanced": true,
+      "max_depth": 2,
+      "extensions": ["ipsw"]
+    },
+    {
+      "name": "Large Stale Files (Desktop/Downloads)",
+      "paths": ["~/Downloads", "~/Desktop"],
+      "safe": false,
+      "max_depth": 2,
+      "min_age_days": 90,
+      "min_size_kb": 1048576
+    },
+    {
+      "name": "Mail Downloads (Review)",
+      "paths": ["~/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"],
+      "safe": false,
+      "max_depth": 3
+    },
+    {
+      "name": "System Cache (Advanced)",
+      "paths": ["/Library/Caches"],
+      "safe": true,
+      "advanced": true,
+      "max_depth": 5
+    },
+    {
+      "name": "Container Caches (Advanced)",
+      "paths": ["~/Library/Containers"],
+      "safe": true,
+      "advanced": true,
+      "max_depth": 6,
+      "require_subpaths": ["library/caches"]
+    },
+    {
+      "name": "Container Temp (Advanced)",
+      "paths": ["~/Library/Containers"],
+      "safe": true,
+      "advanced": true,
+      "max_depth": 6,
+      "min_age_days": 7,
+      "require_subpaths": ["/tmp/"]
+    },
+    {
+      "name": "Group Container Caches (Advanced)",
+      "paths": ["~/Library/Group Containers"],
+      "safe": true,
+      "advanced": true,
+      "max_depth": 6,
+      "require_subpaths": ["library/caches"]
+    },
+    {
+      "name": "App Support Caches (Advanced)",
+      "paths": ["~/Library/Application Support"],
+      "safe": true,
+      "advanced": true,
+      "max_depth": 5,
+      "min_age_days": 7,
+      "require_subpaths": ["gpucache", "cachestorage", "code cache", "dawncache", "shadercache"]
+    }
+  ]
+}
