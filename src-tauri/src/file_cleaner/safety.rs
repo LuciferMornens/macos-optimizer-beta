@@ -7,7 +7,7 @@ pub(crate) fn is_safe_to_delete(path: &Path) -> bool {
     // Everything else requires explicit user review (return false).
     let path_str = path.to_string_lossy().to_lowercase();
 
-    // Quick denylist for clearly sensitive locations
+    // Quick denylist for clearly sensitive locations (avoid overly broad patterns)
     let protected_patterns = vec![
         ".ssh",
         ".gnupg",
@@ -39,7 +39,7 @@ pub(crate) fn is_safe_to_delete(path: &Path) -> bool {
         "private",
         "secret",
         ".localized",
-        "library/application support",
+        // NOTE: Removed "library/application support" (too broad — hides many legit caches).
         "library/preferences",
         "library/keychains",
         "library/accounts",
@@ -98,7 +98,8 @@ pub(crate) fn is_safe_to_delete(path: &Path) -> bool {
         || path_str.ends_with("/library/caches/temporaryitems");
 
     // Explicit allow for Library/Caches and system caches paths
-    let is_library_caches = path_str.contains("/library/caches/") || path_str.ends_with("/library/caches");
+    let is_library_caches =
+        path_str.contains("/library/caches/") || path_str.ends_with("/library/caches");
 
     // Explicit allow for Containers/Group Containers caches and tmp
     let is_container_caches = (path_str.contains("/library/containers/")
@@ -109,14 +110,16 @@ pub(crate) fn is_safe_to_delete(path: &Path) -> bool {
             || path_str.ends_with("/tmp"));
 
     // QuickLook thumbnail cache
-    let is_quicklook_cache = path_str.contains("/library/caches/com.apple.quicklook.thumbnailcache");
+    let is_quicklook_cache =
+        path_str.contains("/library/caches/com.apple.quicklook.thumbnailcache");
 
     // App Store / Music caches
     let is_specific_caches = path_str.contains("/library/caches/com.apple.appstore")
         || path_str.contains("/library/caches/com.apple.music");
 
     // Dropbox cache
-    let is_dropbox_cache = path_str.contains("/.dropbox.cache/") || path_str.ends_with("/.dropbox.cache");
+    let is_dropbox_cache =
+        path_str.contains("/.dropbox.cache/") || path_str.ends_with("/.dropbox.cache");
 
     // Saved Application State: allow if older than 30 days
     let is_saved_state = path_str.contains("/library/saved application state/")
@@ -160,7 +163,7 @@ pub(crate) fn is_safe_to_delete(path: &Path) -> bool {
         }
     }
 
-    // Old installers in Downloads: only .dmg/.pkg, 30d+ (measure by creation time to avoid server-preserved mtime)
+    // Old installers in Downloads: only .dmg/.pkg, 30d+ (creation time preferred)
     let mut is_old_installer = false;
     if let Some(ext) = path.extension() {
         let ext = ext.to_string_lossy().to_lowercase();
@@ -173,6 +176,36 @@ pub(crate) fn is_safe_to_delete(path: &Path) -> bool {
             }
         }
     }
+
+    // Additional developer & package-manager caches (commonly safe)
+    let is_xcode_deriveddata = path_str.contains("/library/developer/xcode/deriveddata");
+    let is_xcode_devicesupport = path_str.contains("/library/developer/xcode/ios devicesupport");
+    let is_coresim = path_str.contains("/library/developer/coresimulator/");
+    let is_coresim_cachey = is_coresim
+        && (path_str.contains("/library/caches/")
+            || path_str.contains("/tmp/")
+            || path_str.contains("/cache"));
+    let is_homebrew_cache = path_str.contains("/library/caches/homebrew");
+    let is_npm_cache = path_str.contains("/.npm/_cacache");
+    let is_pip_cache = path_str.contains("/library/caches/pip");
+    let is_cocoapods_cache = path_str.contains("/library/caches/cocoapods");
+    let is_yarn_cache = path_str.contains("/library/caches/yarn");
+    let is_go_build_cache = path_str.contains("/library/caches/go-build");
+
+    // Cache-like storage under Application Support (e.g., Slack/Service Worker/CacheStorage)
+    let is_app_support_cache_like = path_str.contains("/library/application support/")
+        && (path_str.contains("/cache")
+            || path_str.contains("/caches")
+            || path_str.contains("cachestorage")
+            || path_str.contains("/tmp")
+            || path_str.contains("/temporary")
+            || path_str.contains("/temp"));
+
+    // Age-gated allowances
+    let xcode_devicesupport_old = is_xcode_devicesupport
+        && file_age_days().map(|d| d >= 90).unwrap_or(false);
+    let coresim_logs_old = (is_coresim && (path_str.contains("/logs/") || path_str.ends_with("/logs")))
+        && file_age_days().map(|d| d >= 30).unwrap_or(false);
 
     // Decide: allow only known-safe scenarios
     if is_in_trash
@@ -188,6 +221,17 @@ pub(crate) fn is_safe_to_delete(path: &Path) -> bool {
         || is_incomplete_download
         || is_ios_update
         || is_old_installer
+        || is_homebrew_cache
+        || is_npm_cache
+        || is_pip_cache
+        || is_cocoapods_cache
+        || is_yarn_cache
+        || is_go_build_cache
+        || is_xcode_deriveddata
+        || xcode_devicesupport_old
+        || is_coresim_cachey
+        || coresim_logs_old
+        || is_app_support_cache_like
     {
         return true;
     }
@@ -282,6 +326,15 @@ pub(crate) fn calculate_safety_score(
         }
     }
 
+    // Boost caches/temp even if category name isn't one of the explicit matches
+    let cat_lower = category.to_lowercase();
+    if is_safe && (cat_lower.contains("cache") || cat_lower.contains("temp")) {
+        // Ensure a high score for safe cache/temp buckets
+        score = score.max(90);
+        // Prefer auto-select for generic cache/temp categories
+        auto_select = true;
+    }
+
     // File age adjustment
     if let Ok(metadata) = fs::metadata(path) {
         // Prefer creation time for Downloads/Desktop-related categories; fallback to modified time
@@ -303,6 +356,7 @@ pub(crate) fn calculate_safety_score(
         if let Some(age_days) = age_days_opt {
             // Increase safety for very old files in safe categories
             if age_days > 90 && score >= 80 {
+                // cap at 100
                 score = score.min(100);
                 if category != "Old Downloads" && category != "Xcode Archives" {
                     auto_select = true;
@@ -345,9 +399,9 @@ pub(crate) fn calculate_safety_score(
     // Path-based adjustments
     let path_str = path.to_string_lossy().to_lowercase();
 
-    // Increase safety for known safe patterns
+    // Increase safety for known safe patterns (FIX: use max, not min)
     if path_str.contains(".cache") || path_str.contains("cache/") || path_str.contains("/tmp/") {
-        score = score.min(95);
+        score = score.max(95);
     }
 
     // Decrease safety for patterns that might be important

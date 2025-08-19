@@ -4,7 +4,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Local, Utc};
 use dirs;
 use walkdir::WalkDir;
 
@@ -14,9 +14,14 @@ use super::types::{
     CleaningReport,
 };
 
+/// macOS file cleaner with conservative safety heuristics + user override.
 pub struct FileCleaner {
     cleanable_files: Vec<CleanableFile>,
+    /// Case-insensitive set of paths we've already included
     seen_paths: HashSet<String>,
+    /// If a directory is added, we store its lowercased prefix (ending with '/')
+    /// and skip any children to avoid double-counting.
+    seen_dir_prefixes: Vec<String>,
 }
 
 impl FileCleaner {
@@ -24,12 +29,15 @@ impl FileCleaner {
         FileCleaner {
             cleanable_files: Vec::new(),
             seen_paths: HashSet::new(),
+            seen_dir_prefixes: Vec::new(),
         }
     }
 
+    /// Scan system according to embedded rules and produce a report.
     pub fn scan_system(&mut self) -> Result<CleaningReport, String> {
         self.cleanable_files.clear();
         self.seen_paths.clear();
+        self.seen_dir_prefixes.clear();
 
         // Load rule set (embedded at compile time)
         let rules: CleanerRules = load_rules_result()?;
@@ -54,9 +62,9 @@ impl FileCleaner {
         }
 
         let now = Utc::now();
-        let max_depth = rule.max_depth.unwrap_or(5);
         let min_age = rule.min_age_days;
         let min_size_bytes_from_rule = rule.min_size_kb.map(|kb| kb * 1024);
+
         let excludes = rule
             .excludes
             .as_ref()
@@ -72,39 +80,122 @@ impl FileCleaner {
             .map(|v| v.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>())
             .unwrap_or_default();
 
-        for entry in WalkDir::new(path)
-            .max_depth(max_depth)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            if entry.file_type().is_file() {
-                let file_path = entry.path();
-                // Skip symlinks to avoid unintended deletions
-                if let Ok(md) = fs::symlink_metadata(file_path) {
-                    if md.file_type().is_symlink() {
-                        continue;
+        // Build the walker with UNLIMITED depth by default (fixes missing nested items).
+        let walker = WalkDir::new(path);
+        let iter = if let Some(d) = rule.max_depth {
+            walker.max_depth(d).into_iter()
+        } else {
+            walker.into_iter()
+        };
+
+        let root_lower = path.to_string_lossy().to_lowercase();
+
+        for entry in iter.filter_map(|e| e.ok()) {
+            let file_type = entry.file_type();
+            let file_path = entry.path();
+
+            // Skip symlinks to avoid unintended deletions
+            if let Ok(md) = fs::symlink_metadata(file_path) {
+                if md.file_type().is_symlink() {
+                    continue;
+                }
+            }
+
+            let key = file_path.to_string_lossy().to_string();
+            let path_lower = key.to_lowercase();
+
+            // Skip anything under a directory we've already staged for cleaning
+            if self
+                .seen_dir_prefixes
+                .iter()
+                .any(|prefix| path_lower.starts_with(prefix))
+            {
+                continue;
+            }
+
+            // De-duplicate across multiple scans/categories (case-insensitive)
+            if self.seen_paths.contains(&path_lower) {
+                continue;
+            }
+
+            // Exclude by simple substring match on lowercased path
+            if excludes.iter().any(|ex| path_lower.contains(ex)) {
+                continue;
+            }
+
+            // Require at least one matching subpath if specified
+            if !require_subpaths.is_empty()
+                && !require_subpaths.iter().any(|req| path_lower.contains(req))
+            {
+                continue;
+            }
+
+            // Directories: include when applicable (many macOS caches are directories)
+            if file_type.is_dir() {
+                // If the rule targets specific file extensions, skip directories
+                if exts.is_some() {
+                    continue;
+                }
+
+                // Don't add the rule's root path itself; show inner items instead
+                if path_lower == root_lower {
+                    continue;
+                }
+
+                // Age filter for directories
+                if let Some(days) = min_age {
+                    if let Ok(meta) = fs::metadata(file_path) {
+                        if let Ok(modified) = meta.modified() {
+                            let m = DateTime::<Utc>::from(modified);
+                            if now.signed_duration_since(m) < Duration::days(days) {
+                                continue;
+                            }
+                        }
                     }
                 }
-                let key = file_path.to_string_lossy().to_string();
 
-                // De-duplicate across multiple scans/categories
-                if self.seen_paths.contains(&key) {
+                // Compute directory size after filters (avoid heavy work otherwise)
+                let dir_size = match self.get_directory_size(file_path) {
+                    Ok(sz) => sz,
+                    Err(_) => 0,
+                };
+
+                // Size filter (include everything unless rule explicitly specifies a minimum)
+                let min_size = min_size_bytes_from_rule.unwrap_or(0);
+                if dir_size < min_size {
                     continue;
                 }
 
-                // Exclude by simple substring match on lowercased path
-                let path_lower = key.to_lowercase();
-                if excludes.iter().any(|ex| path_lower.contains(ex)) {
-                    continue;
-                }
+                // Safety heuristics (controls auto-select, not user ability to remove)
+                let is_safe = rule.safe && is_safe_to_delete(file_path);
+                let (safety_score, auto_select) =
+                    calculate_safety_score(file_path, &rule.name, rule.min_age_days, is_safe);
 
-                // Require at least one matching subpath if specified
-                if !require_subpaths.is_empty()
-                    && !require_subpaths.iter().any(|req| path_lower.contains(req))
-                {
-                    continue;
-                }
+                let last_modified = fs::metadata(file_path)
+                    .and_then(|m| m.modified())
+                    .map(|t| DateTime::<Utc>::from(t).timestamp())
+                    .unwrap_or(0);
 
+                let cleanable = CleanableFile {
+                    path: key.clone(),
+                    size: dir_size,
+                    category: rule.name.clone(),
+                    description: self.get_file_description(file_path, &rule.name),
+                    last_modified,
+                    safe_to_delete: is_safe,
+                    safety_score,
+                    auto_select,
+                };
+
+                self.cleanable_files.push(cleanable);
+                self.seen_paths.insert(path_lower.clone());
+                self.push_seen_dir_prefix(&path_lower);
+
+                continue;
+            }
+
+            // Files
+            if file_type.is_file() {
                 if let Ok(metadata) = fs::metadata(file_path) {
                     // Extension filter
                     if let Some(ref allowed_exts) = exts {
@@ -122,9 +213,8 @@ impl FileCleaner {
                         }
                     }
 
-                    // Age filter (use creation time for Downloads/Desktop categories to avoid misclassifying newly downloaded files with old modified times)
+                    // Age filter (prefer creation time for Downloads/Desktop categories)
                     if let Some(days) = min_age {
-                        // Prefer file creation time for Downloads/Desktop-related categories; fallback to modified time
                         let relevant_time = (|| {
                             let name_lower = rule.name.to_lowercase();
                             if name_lower.contains("downloads") || name_lower.contains("desktop") {
@@ -137,6 +227,7 @@ impl FileCleaner {
                                 .ok()
                                 .map(|t| DateTime::<Utc>::from(t))
                         })();
+
                         if let Some(file_time) = relevant_time {
                             if now.signed_duration_since(file_time) < Duration::days(days) {
                                 continue;
@@ -144,12 +235,9 @@ impl FileCleaner {
                         }
                     }
 
-                    // Size filter (default skip tiny files < 1KB)
+                    // Size filter – do NOT hide tiny files unless the rule specifies a minimum
                     let file_size = metadata.len();
-                    let tiny_threshold = 1024u64;
-                    let min_size = min_size_bytes_from_rule
-                        .unwrap_or(tiny_threshold)
-                        .max(tiny_threshold);
+                    let min_size = min_size_bytes_from_rule.unwrap_or(0);
                     if file_size < min_size {
                         continue;
                     }
@@ -179,12 +267,20 @@ impl FileCleaner {
                     };
 
                     self.cleanable_files.push(cleanable);
-                    self.seen_paths.insert(key);
+                    self.seen_paths.insert(path_lower);
                 }
             }
         }
 
         Ok(())
+    }
+
+    fn push_seen_dir_prefix(&mut self, path_lower: &str) {
+        let mut prefix = path_lower.to_string();
+        if !prefix.ends_with('/') {
+            prefix.push('/');
+        }
+        self.seen_dir_prefixes.push(prefix);
     }
 
     fn get_file_description(&self, path: &Path, category: &str) -> String {
@@ -196,7 +292,7 @@ impl FileCleaner {
             "Browser Cache" => format!("Browser cache: {}", filename),
             "App Store Cache" => format!("App Store cache: {}", filename),
             "Music Cache" => format!("Music cache: {}", filename),
-            "Trash" => format!("Trashed file: {}", filename),
+            "Trash" => format!("Trashed item: {}", filename),
             "Incomplete Downloads (2d+)" => format!("Incomplete download: {}", filename),
             "Saved Application State (30d+)" => format!("Saved state: {}", filename),
             "Container Caches (Advanced)" => format!("Container cache: {}", filename),
@@ -205,11 +301,11 @@ impl FileCleaner {
             "App Support Caches (Advanced)" => format!("App support cache: {}", filename),
             "Dropbox Cache" => format!("Dropbox cache: {}", filename),
             "Old Downloads" | "Old Downloads (90d+)" => format!("Old download: {}", filename),
-            "Large Stale Files (Desktop/Downloads)" => format!("Large stale file: {}", filename),
-            "Temporary Files" => format!("Temporary file: {}", filename),
-            "User Temporary Files" => format!("Temporary file: {}", filename),
+            "Large Stale Files (Desktop/Downloads)" => format!("Large stale item: {}", filename),
+            "Temporary Files" => format!("Temporary item: {}", filename),
+            "User Temporary Files" => format!("Temporary item: {}", filename),
             "QuickLook Cache" => format!("QuickLook thumbnail: {}", filename),
-            "User Logs (30d+)" => format!("Old log file: {}", filename),
+            "User Logs (30d+)" => format!("Old log: {}", filename),
             "System Logs (30d+, Advanced)" => format!("System log: {}", filename),
             "Crash Reports (30d+)" => format!("Crash report: {}", filename),
             "System Crash Reports (30d+, Advanced)" => format!("System crash report: {}", filename),
@@ -260,70 +356,119 @@ impl FileCleaner {
         &self.cleanable_files
     }
 
+    /// Remove selected items.
+    /// - We prefer moving to Trash (recoverable) and only fall back to direct removal if needed.
+    /// - We allow deletion of items that appeared in the latest scan, even if marked "review".
     pub fn clean_files(&self, file_paths: Vec<String>) -> Result<(u64, usize), String> {
         let mut total_freed = 0u64;
-        let mut files_deleted = 0usize;
+        let mut items_removed = 0usize;
         let mut errors = Vec::new();
+
+        // Collect items that failed due to permissions to retry once with elevation
+        #[derive(Clone)]
+        struct PendingElevated {
+            path: String,
+            size: u64,
+            is_dir: bool,
+        }
+        let mut pending_elevated: Vec<PendingElevated> = Vec::new();
 
         for path_str in file_paths {
             let path = Path::new(&path_str);
 
-            // Find the file in our cleanable list to verify it's safe
-            let is_safe = self
-                .cleanable_files
-                .iter()
-                .find(|f| f.path == path_str)
-                .map(|f| f.safe_to_delete)
-                .unwrap_or(false);
-
-            if !is_safe {
-                errors.push(format!("Skipping unsafe file: {}", path_str));
+            // Only allow deleting items that were part of the latest scan
+            let maybe_item = self.cleanable_files.iter().find(|f| f.path == path_str);
+            if maybe_item.is_none() {
+                errors.push(format!("Skipping unknown item: {}", path_str));
                 continue;
             }
+            let is_dir = path.is_dir();
 
-            // Get file size before deletion
-            let file_size = match fs::metadata(path) {
-                Ok(m) => m.len(),
-                Err(e) => {
-                    // If the file is already gone, treat as success (nothing to do)
-                    if e.kind() == ErrorKind::NotFound {
-                        files_deleted += 1; // consider it handled
-                        continue;
+            // Get size before deletion (directories need recursive sizing)
+            let item_size = if is_dir {
+                self.get_directory_size(path).unwrap_or(0)
+            } else {
+                match fs::metadata(path) {
+                    Ok(m) => m.len(),
+                    Err(e) => {
+                        if e.kind() == ErrorKind::NotFound {
+                            items_removed += 1;
+                            continue;
+                        }
+                        0
                     }
-                    0
                 }
             };
 
-            // Attempt to delete the file
-            match fs::remove_file(path) {
+            // Prefer moving to Trash for safety; fallback to direct removal if needed
+            match self.move_to_trash(path) {
                 Ok(_) => {
-                    total_freed += file_size;
-                    files_deleted += 1;
+                    total_freed += item_size;
+                    items_removed += 1;
+                    continue;
                 }
-                Err(e) => {
-                    if e.kind() == ErrorKind::NotFound {
-                        // Already deleted by another process; count as handled
-                        files_deleted += 1;
-                        continue;
-                    }
-                    // Try to move to trash instead of permanent deletion
-                    match self.move_to_trash(path) {
+                Err(_trash_err) => {
+                    // If trash move failed, try direct removal appropriate to type
+                    let res = if is_dir {
+                        fs::remove_dir_all(path)
+                    } else {
+                        fs::remove_file(path)
+                    };
+
+                    match res {
                         Ok(_) => {
-                            total_freed += file_size;
-                            files_deleted += 1;
+                            total_freed += item_size;
+                            items_removed += 1;
                         }
-                        Err(trash_err) => {
-                            // If the trash move failed because file disappeared in the meantime, treat as handled
-                            if trash_err.contains("No such file or directory") {
-                                files_deleted += 1;
-                            } else {
-                                errors.push(format!(
-                                    "Failed to delete {}: {} (trash: {})",
-                                    path_str, e, trash_err
-                                ));
+                        Err(e) => {
+                            use std::io::ErrorKind::*;
+                            match e.kind() {
+                                NotFound => {
+                                    items_removed += 1;
+                                }
+                                PermissionDenied => {
+                                    // Queue for a single elevated removal attempt later
+                                    pending_elevated.push(PendingElevated {
+                                        path: path_str.clone(),
+                                        size: item_size,
+                                        is_dir,
+                                    });
+                                }
+                                _ => {
+                                    errors.push(format!("Failed to remove {}: {}", path_str, e));
+                                }
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // On macOS, retry permission-denied items once using a single admin prompt
+        #[cfg(target_os = "macos")]
+        if !pending_elevated.is_empty() {
+            match Self::remove_with_admin(&pending_elevated.iter().map(|p| p.path.as_str()).collect::<Vec<_>>()) {
+                Ok(_) => {
+                    // Verify and account freed sizes
+                    for p in pending_elevated.iter() {
+                        let path = Path::new(&p.path);
+                        if !path.exists() {
+                            total_freed += p.size;
+                            items_removed += 1;
+                        } else {
+                            // Fallback check: try a final direct removal if elevation succeeded partially
+                            let _ = if p.is_dir { fs::remove_dir_all(path) } else { fs::remove_file(path) };
+                            if !path.exists() {
+                                total_freed += p.size;
+                                items_removed += 1;
+                            } else {
+                                errors.push(format!("Failed to remove {} even with admin rights", p.path));
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    errors.push(format!("Admin removal failed: {}", e));
                 }
             }
         }
@@ -332,29 +477,122 @@ impl FileCleaner {
             eprintln!("Cleaning errors: {:?}", errors);
         }
 
-        Ok((total_freed, files_deleted))
+        Ok((total_freed, items_removed))
     }
 
-    fn move_to_trash(&self, path: &Path) -> Result<(), String> {
-        if let Some(home) = dirs::home_dir() {
-            let trash = home.join(".Trash");
-            let filename = path
-                .file_name()
-                .ok_or_else(|| "Invalid filename".to_string())?;
+    #[cfg(target_os = "macos")]
+    fn remove_with_admin(paths: &[&str]) -> Result<(), String> {
+        if paths.is_empty() {
+            return Ok(());
+        }
 
-            let trash_path = trash.join(filename);
+        // Restrict to user's home directory for safety
+        let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
+        let home_str = home.to_string_lossy().to_string();
 
-            fs::rename(path, trash_path).map_err(|e| format!("Failed to move to trash: {}", e))?;
+        // Build AppleScript that constructs a single shell script and runs it once with admin rights.
+        // Use 'quoted form of POSIX path' for robust escaping.
+        let mut script = String::from("set cmd to \"\"\n");
+        for p in paths {
+            // Only include paths within the user's home directory
+            if p.starts_with(&home_str) {
+                let escaped = p.replace("\\", "\\\\").replace("\"", "\\\"");
+                script.push_str(&format!(
+                    "set cmd to cmd & \"rm -rf \" & quoted form of POSIX path of \"{}\" & \"\n\"\n",
+                    escaped
+                ));
+            }
+        }
 
+        // If nothing eligible, bail out
+        if !script.contains("rm -rf") {
+            return Ok(());
+        }
+
+        script.push_str("do shell script cmd with administrator privileges\n");
+
+        let output = Command::new("osascript")
+            .arg("-e")
+            .arg(script)
+            .output()
+            .map_err(|e| format!("Failed to run osascript: {}", e))?;
+
+        if output.status.success() {
             Ok(())
         } else {
-            Err("Could not find home directory".to_string())
+            Err(format!(
+                "osascript failed (status: {:?}): {}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 
+    /// Move a file or directory to the macOS Trash.
+    /// 1) Ask Finder (osascript) — handles per-volume trash & name collisions.
+    /// 2) Fallback: rename into ~/.Trash with a unique name.
+    fn move_to_trash(&self, path: &Path) -> Result<(), String> {
+        // Try Finder first
+        let path_str = path.to_string_lossy();
+        let escaped = path_str.replace("\\", "\\\\").replace("\"", "\\\"");
+        let script = format!(
+            "tell application \"Finder\" to move POSIX file \"{}\" to trash",
+            escaped
+        );
+
+        let applescript_output = Command::new("osascript")
+            .arg("-e")
+            .arg(script)
+            .output()
+            .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
+
+        if applescript_output.status.success() {
+            return Ok(());
+        }
+
+        // Fallback: rename into ~/.Trash with a unique name
+        let home =
+            dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
+        let trash = home.join(".Trash");
+        if !trash.exists() {
+            fs::create_dir_all(&trash)
+                .map_err(|e| format!("Failed to create trash directory: {}", e))?;
+        }
+
+        let original_name = path
+            .file_name()
+            .ok_or_else(|| "Invalid filename".to_string())?;
+        let mut target = trash.join(original_name);
+
+        // Ensure unique filename
+        if target.exists() {
+            let stem = original_name.to_string_lossy().to_string();
+            let (base, ext) = split_name_ext(&stem);
+            let ts = Local::now().format("%Y%m%d-%H%M%S").to_string();
+            let mut counter = 1u32;
+            loop {
+                let candidate = if ext.is_empty() {
+                    format!("{} ({}-{})", base, ts, counter)
+                } else {
+                    format!("{} ({}-{}).{}", base, ts, counter, ext)
+                };
+                target = trash.join(candidate);
+                if !target.exists() {
+                    break;
+                }
+                counter += 1;
+            }
+        }
+
+        fs::rename(path, &target).map_err(|e| format!("Failed to move to trash: {}", e))?;
+        Ok(())
+    }
+
+    /// Empty Trash using Finder (preferred), with safe fallbacks.
     pub fn empty_trash(&self) -> Result<(u64, usize), String> {
         // Get initial trash size and count
-        let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
+        let home =
+            dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
         let trash_dir = home.join(".Trash");
 
         if !trash_dir.exists() {
@@ -367,7 +605,6 @@ impl FileCleaner {
             .unwrap_or(0);
 
         // First attempt: Use AppleScript to empty trash properly through Finder
-        // This respects macOS trash handling and permissions
         let script = "tell application \"Finder\" to empty trash";
 
         let applescript_output = Command::new("osascript")
@@ -378,11 +615,9 @@ impl FileCleaner {
 
         if !applescript_output.status.success() {
             // If AppleScript fails, try removing contents manually
-            // Only remove contents, not the .Trash directory itself
             if let Ok(entries) = fs::read_dir(&trash_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    // Try to remove each item in trash
                     if path.is_dir() {
                         let _ = fs::remove_dir_all(&path);
                     } else {
@@ -394,7 +629,10 @@ impl FileCleaner {
             // If still items remain, try shell command to clear trash contents
             if let Some(trash_str) = trash_dir.to_str() {
                 let trash_contents = format!("{}/{}", trash_str, "*");
-                let _ = Command::new("sh").arg("-c").arg(format!("rm -rf {}", trash_contents)).output();
+                let _ = Command::new("sh")
+                    .arg("-c")
+                    .arg(format!("rm -rf {}", trash_contents))
+                    .output();
             }
         }
 
@@ -452,5 +690,15 @@ impl FileCleaner {
             }
         }
         Some(PathBuf::from(input))
+    }
+}
+
+/// Utility: split a name into (base, ext) without touching the filesystem.
+fn split_name_ext(name: &str) -> (String, String) {
+    if let Some(idx) = name.rfind('.') {
+        let (base, ext) = name.split_at(idx);
+        (base.to_string(), ext.trim_start_matches('.').to_string())
+    } else {
+        (name.to_string(), String::new())
     }
 }
