@@ -53,6 +53,9 @@ function setupTabNavigation() {
             });
             document.getElementById(tabName).classList.add('active');
             
+            // Always stop processes auto-refresh when switching tabs
+            stopProcessesAutoRefresh();
+
             // Load tab-specific data
             switch(tabName) {
                 case 'dashboard':
@@ -70,6 +73,7 @@ function setupTabNavigation() {
                     break;
                 case 'processes':
                     loadProcesses();
+                    startProcessesAutoRefresh();
                     break;
             }
         });
@@ -295,28 +299,61 @@ async function cleanSelectedFiles() {
 
 // Process management functions
 let allProcesses = [];
+let processSearchTerm = '';
+let processSortBy = 'memory';
+let processesAutoRefreshTimer = null;
 
 async function loadProcesses() {
     try {
         allProcesses = await invoke('get_processes');
-        displayProcesses(allProcesses);
+        renderProcesses();
     } catch (error) {
         console.error('Error loading processes:', error);
         showNotification('Failed to load processes', 'error');
     }
 }
 
-function displayProcesses(processes) {
-    const processList = document.getElementById('processes-list');
-    processList.innerHTML = '';
-    
-    // Sort by memory by default
-    processes.sort((a, b) => b.memory_usage - a.memory_usage);
-    
-    // Display top 50 processes
-    processes.slice(0, 50).forEach(process => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
+function renderProcesses() {
+const processList = document.getElementById('processes-list');
+processList.innerHTML = '';
+
+// Filter
+let view = allProcesses;
+if (processSearchTerm && processSearchTerm.length > 0) {
+    const term = processSearchTerm;
+    view = view.filter(p => p.name.toLowerCase().includes(term));
+}
+
+// Sort
+switch (processSortBy) {
+case 'cpu':
+view = [...view].sort((a, b) => b.cpu_usage - a.cpu_usage);
+break;
+case 'name':
+view = [...view].sort((a, b) => a.name.localeCompare(b.name));
+break;
+case 'memory':
+default:
+    view = [...view].sort((a, b) => b.memory_usage - a.memory_usage);
+        break;
+}
+
+// Display top 50
+const rows = view.slice(0, 50);
+
+if (rows.length === 0) {
+const row = document.createElement('tr');
+const cell = document.createElement('td');
+cell.colSpan = 5;
+cell.textContent = 'No matching processes';
+row.appendChild(cell);
+processList.appendChild(row);
+return;
+}
+
+rows.forEach(process => {
+const row = document.createElement('tr');
+    row.innerHTML = `
             <td>${process.name}</td>
             <td>${process.pid}</td>
             <td>${process.cpu_usage.toFixed(1)}%</td>
@@ -329,13 +366,14 @@ function displayProcesses(processes) {
         `;
         processList.appendChild(row);
     });
-    
+
     // Add kill process handlers
     document.querySelectorAll('.kill-process').forEach(button => {
         button.addEventListener('click', async (e) => {
-            const pid = parseInt(e.target.dataset.pid);
-            const name = e.target.dataset.name;
-            
+            const btn = e.currentTarget;
+            const pid = parseInt(btn.dataset.pid);
+            const name = btn.dataset.name;
+
             if (confirm(`Are you sure you want to end the process "${name}" (PID: ${pid})?`)) {
                 try {
                     await invoke('kill_process', { pid });
@@ -349,32 +387,29 @@ function displayProcesses(processes) {
     });
 }
 
+function startProcessesAutoRefresh() {
+    stopProcessesAutoRefresh();
+    processesAutoRefreshTimer = setInterval(() => {
+        loadProcesses();
+    }, 2000);
+}
+
+function stopProcessesAutoRefresh() {
+    if (processesAutoRefreshTimer) {
+        clearInterval(processesAutoRefreshTimer);
+        processesAutoRefreshTimer = null;
+    }
+}
+
 // Search and sort processes
 document.getElementById('process-search').addEventListener('input', (e) => {
-    const searchTerm = e.target.value.toLowerCase();
-    const filtered = allProcesses.filter(p => 
-        p.name.toLowerCase().includes(searchTerm)
-    );
-    displayProcesses(filtered);
+    processSearchTerm = e.target.value.toLowerCase();
+    renderProcesses();
 });
 
 document.getElementById('process-sort').addEventListener('change', (e) => {
-    const sortBy = e.target.value;
-    let sorted = [...allProcesses];
-    
-    switch(sortBy) {
-        case 'memory':
-            sorted.sort((a, b) => b.memory_usage - a.memory_usage);
-            break;
-        case 'cpu':
-            sorted.sort((a, b) => b.cpu_usage - a.cpu_usage);
-            break;
-        case 'name':
-            sorted.sort((a, b) => a.name.localeCompare(b.name));
-            break;
-    }
-    
-    displayProcesses(sorted);
+    processSortBy = e.target.value;
+    renderProcesses();
 });
 
 // Event listeners
