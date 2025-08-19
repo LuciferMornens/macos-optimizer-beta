@@ -6,7 +6,7 @@ use system_info::{SystemMonitor, SystemInfo, MemoryInfo, ProcessInfo, DiskInfo, 
 use file_cleaner::{FileCleaner, CleanableFile, CleaningReport};
 use memory_optimizer::{MemoryOptimizer, MemoryOptimizationResult, MemoryStats};
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{Manager, State};
 
 // Create a state to manage our system monitor
 struct AppState {
@@ -166,6 +166,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(app_state)
+        .setup(|app| {
+            // Ensure main window is visible and focused before heavy rendering starts.
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_system_info,
             get_memory_info,
