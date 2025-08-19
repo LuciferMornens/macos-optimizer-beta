@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, Pid, Networks, Components, Disks};
+use libc::{kill as libc_kill, SIGKILL, SIGTERM};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemInfo {
@@ -209,14 +210,27 @@ impl SystemMonitor {
     }
 
     pub fn kill_process(&mut self, pid: u32) -> Result<(), String> {
-        if let Some(process) = self.system.process(Pid::from_u32(pid)) {
-            if process.kill() {
-                Ok(())
-            } else {
-                Err(format!("Failed to kill process {}", pid))
-            }
+        // Try a graceful termination first
+        let term_res = unsafe { libc_kill(pid as i32, SIGTERM) };
+        if term_res == 0 {
+            return Ok(());
+        }
+
+        // If the process no longer exists, consider it terminated
+        if self.system.process(Pid::from_u32(pid)).is_none() {
+            return Ok(());
+        }
+
+        // Escalate to force kill
+        let kill_res = unsafe { libc_kill(pid as i32, SIGKILL) };
+        if kill_res == 0 {
+            Ok(())
         } else {
-            Err(format!("Process {} not found", pid))
+            Err(format!(
+                "Failed to kill process {}: {}",
+                pid,
+                std::io::Error::last_os_error()
+            ))
         }
     }
 }
