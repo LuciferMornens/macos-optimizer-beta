@@ -94,6 +94,13 @@ fn optimize_memory(state: State<AppState>) -> Result<MemoryOptimizationResult, S
 }
 
 #[tauri::command]
+fn optimize_memory_admin(state: State<AppState>) -> Result<MemoryOptimizationResult, String> {
+    let optimizer = state.memory_optimizer.lock().map_err(|e| e.to_string())?;
+    // Use GUI authentication for admin operations
+    optimizer.optimize_memory_with_admin(true)
+}
+
+#[tauri::command]
 fn clear_inactive_memory(state: State<AppState>) -> Result<u64, String> {
     let optimizer = state.memory_optimizer.lock().map_err(|e| e.to_string())?;
     optimizer.clear_inactive_memory()
@@ -153,6 +160,7 @@ pub fn run() {
             clean_files,
             empty_trash,
             optimize_memory,
+            optimize_memory_admin,
             clear_inactive_memory,
             get_memory_pressure,
             get_network_info,

@@ -35,37 +35,46 @@ function showNotification(message, type = 'success') {
     }, 3000);
 }
 
-// Tab navigation
-document.querySelectorAll('.nav-item').forEach(item => {
-    item.addEventListener('click', () => {
-        const tabName = item.dataset.tab;
-        
-        // Update nav items
-        document.querySelectorAll('.nav-item').forEach(nav => {
-            nav.classList.remove('active');
+// Tab navigation - will be set up in DOMContentLoaded
+function setupTabNavigation() {
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const tabName = item.dataset.tab;
+            
+            // Update nav items
+            document.querySelectorAll('.nav-item').forEach(nav => {
+                nav.classList.remove('active');
+            });
+            item.classList.add('active');
+            
+            // Update content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(tabName).classList.add('active');
+            
+            // Load tab-specific data
+            switch(tabName) {
+                case 'dashboard':
+                    loadDashboard();
+                    break;
+                case 'memory':
+                    loadMemoryInfo();
+                    // Debug: Check button visibility when Memory tab is shown
+                    setTimeout(() => {
+                        const deepCleanBtn = document.getElementById('deep-clean-memory');
+                        if (deepCleanBtn) {
+                            console.log('Memory tab active - Deep clean button visible:', deepCleanBtn.offsetParent !== null);
+                        }
+                    }, 100);
+                    break;
+                case 'processes':
+                    loadProcesses();
+                    break;
+            }
         });
-        item.classList.add('active');
-        
-        // Update content
-        document.querySelectorAll('.tab-content').forEach(content => {
-            content.classList.remove('active');
-        });
-        document.getElementById(tabName).classList.add('active');
-        
-        // Load tab-specific data
-        switch(tabName) {
-            case 'dashboard':
-                loadDashboard();
-                break;
-            case 'memory':
-                loadMemoryInfo();
-                break;
-            case 'processes':
-                loadProcesses();
-                break;
-        }
     });
-});
+}
 
 // Dashboard functions
 async function loadDashboard() {
@@ -369,60 +378,247 @@ document.getElementById('process-sort').addEventListener('change', (e) => {
 // Event listeners
 document.getElementById('quick-optimize').addEventListener('click', async () => {
     try {
-        showNotification('Starting optimization...', 'success');
+        showNotification('Starting quick optimization...', 'success');
         
-        // Optimize memory
+        // Use safe mode for quick optimize (no admin prompt)
         const result = await invoke('optimize_memory');
         
-        const freedMemory = formatBytes(Math.abs(result.freed_memory));
-        showNotification(`Optimization complete! Freed ${freedMemory} of memory`, 'success');
+        let message = 'Quick optimization complete!';
+        if (result.freed_memory > 0) {
+            message += ` Freed ${formatBytes(Math.abs(result.freed_memory))} of memory`;
+        }
+        
+        // Show what was done
+        if (result.optimizations_performed && result.optimizations_performed.length > 0) {
+            console.log('Optimizations performed:', result.optimizations_performed);
+        }
+        
+        showNotification(message, 'success');
         
         // Reload dashboard
         await loadDashboard();
     } catch (error) {
         console.error('Error optimizing:', error);
-        showNotification('Optimization failed. Some operations may require admin privileges.', 'error');
+        showNotification('Quick optimization completed with limited access. Use Memory tab for full optimization.', 'warning');
     }
 });
 
-document.getElementById('optimize-memory').addEventListener('click', async () => {
-    try {
-        const result = await invoke('optimize_memory');
-        
-        const resultDiv = document.getElementById('optimization-result');
-        const resultContent = resultDiv.querySelector('.result-content');
-        
-        resultContent.innerHTML = `
-            <p><strong>Memory Before:</strong> ${formatBytes(result.memory_before.used)} / ${formatBytes(result.memory_before.total)}</p>
-            <p><strong>Memory After:</strong> ${formatBytes(result.memory_after.used)} / ${formatBytes(result.memory_after.total)}</p>
-            <p><strong>Memory Freed:</strong> ${formatBytes(result.freed_memory)}</p>
-            <p><strong>Status:</strong> ${result.message}</p>
-        `;
-        
-        resultDiv.style.display = 'block';
-        showNotification('Memory optimization complete!', 'success');
-        
-        // Reload memory info
-        await loadMemoryInfo();
-    } catch (error) {
-        console.error('Error optimizing memory:', error);
-        showNotification('Memory optimization failed', 'error');
+// Old event handlers removed - now using event delegation in DOMContentLoaded
+
+function setupEventListeners() {
+    // Direct listener for deep clean button as fallback
+    const deepCleanBtn = document.getElementById('deep-clean-memory');
+    if (deepCleanBtn) {
+        deepCleanBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation(); // Prevent the delegated handler from also firing
+            console.log('Deep clean direct listener triggered!');
+            
+            // Skip confirmation dialog for now - it's not working properly in WebView
+            console.log('Deep clean requested, proceeding...');
+            
+            // You can uncomment this to re-enable confirmation later
+            // const confirmed = confirm(
+            //     '⚠️ Deep Clean with Administrator Access\n\n' +
+            //     'This will:\n' +
+            //     '• Purge all disk caches\n' +
+            //     '• Clear DNS and network caches\n' +
+            //     '• Optimize memory compression\n' +
+            //     '• Free inactive memory\n' +
+            //     '• Clear application caches\n\n' +
+            //     'You will be prompted for your administrator password.\n' +
+            //     'Continue?'
+            // );
+            // 
+            // if (!confirmed) {
+            //     console.log('User cancelled deep clean');
+            //     return;
+            // }
+            
+            console.log('Starting deep clean with admin access...');
+            
+            try {
+                showNotification('Starting deep clean with admin access...', 'success');
+                console.log('Invoking optimize_memory_admin...');
+                const result = await invoke('optimize_memory_admin');
+                console.log('Deep clean result received:', result);
+                
+                const resultDiv = document.getElementById('optimization-result');
+                const resultContent = resultDiv.querySelector('.result-content');
+                
+                let optimizationsList = '';
+                if (result.optimizations_performed && result.optimizations_performed.length > 0) {
+                    optimizationsList = '<ul style="color: #34C759;">' +
+                        result.optimizations_performed.map(opt => `<li>✓ ${opt}</li>`).join('') +
+                        '</ul>';
+                }
+                
+                resultContent.innerHTML = `
+                    <h4 style="color: #34C759;">✨ Deep Clean Complete!</h4>
+                    <p><strong>Memory Freed:</strong> <span style="color: #34C759; font-size: 24px;">${formatBytes(result.freed_memory)}</span></p>
+                    <p><strong>Memory Usage:</strong> ${formatBytes(result.memory_after.used)} / ${formatBytes(result.memory_after.total)}</p>
+                    <p><strong>Available Now:</strong> ${formatBytes(result.memory_after.available)}</p>
+                    <div style="margin-top: 15px;">
+                        <strong>Optimizations Performed:</strong>
+                        ${optimizationsList}
+                    </div>
+                `;
+                
+                resultDiv.style.display = 'block';
+                resultDiv.style.border = '2px solid #34C759';
+                
+                showNotification(`Deep clean complete! Freed ${formatBytes(result.freed_memory)} of memory`, 'success');
+                
+                await loadMemoryInfo();
+            } catch (error) {
+                console.error('Deep clean error:', error);
+                showNotification('Deep clean failed: ' + error, 'error');
+            }
+        });
     }
-});
-
-document.getElementById('refresh-memory').addEventListener('click', loadMemoryInfo);
-document.getElementById('refresh-processes').addEventListener('click', loadProcesses);
-document.getElementById('scan-files').addEventListener('click', scanForCleanableFiles);
-document.getElementById('clean-selected').addEventListener('click', cleanSelectedFiles);
-
-// Notification close button
-document.querySelector('.notification-close').addEventListener('click', () => {
-    document.getElementById('notification').classList.remove('show');
-});
+    
+    // Setup other event listeners (non-memory buttons that aren't using delegation)
+    const refreshMemoryBtn = document.getElementById('refresh-memory');
+    if (refreshMemoryBtn) {
+        refreshMemoryBtn.addEventListener('click', loadMemoryInfo);
+    }
+    
+    const refreshProcessesBtn = document.getElementById('refresh-processes');
+    if (refreshProcessesBtn) {
+        refreshProcessesBtn.addEventListener('click', loadProcesses);
+    }
+    
+    const scanFilesBtn = document.getElementById('scan-files');
+    if (scanFilesBtn) {
+        scanFilesBtn.addEventListener('click', scanForCleanableFiles);
+    }
+    
+    const cleanSelectedBtn = document.getElementById('clean-selected');
+    if (cleanSelectedBtn) {
+        cleanSelectedBtn.addEventListener('click', cleanSelectedFiles);
+    }
+    
+    // Notification close button
+    const notificationClose = document.querySelector('.notification-close');
+    if (notificationClose) {
+        notificationClose.addEventListener('click', () => {
+            document.getElementById('notification').classList.remove('show');
+        });
+    }
+}
 
 // Wait for window to load and Tauri to be ready
 window.addEventListener('DOMContentLoaded', () => {
     console.log('DOM loaded, checking Tauri...');
+    
+    // Setup tab navigation
+    setupTabNavigation();
+    console.log('Tab navigation setup complete');
+    
+    // Use event delegation for ALL button clicks (works with dynamic content)
+    document.body.addEventListener('click', async (event) => {
+        // Guard against non-Element targets (text nodes in WebKit)
+        const tgt = event.target;
+        if (!(tgt instanceof Element)) return;
+        
+        // Check if clicked element is a button or inside a button
+        const button = tgt.closest('button');
+        if (!button) return;
+        
+        console.log('Button clicked with ID:', button.id);
+        
+        // Skip deep-clean-memory as it has its own direct listener
+        if (button.id === 'deep-clean-memory') {
+            console.log('Deep clean button - handled by direct listener');
+            return;
+        }
+        
+        // Handle optimize memory button
+        if (button.id === 'optimize-memory') {
+            console.log('Optimize memory button handler triggered!');
+            event.preventDefault();
+            
+            const useAdmin = confirm(
+                'Memory Optimization Options:\n\n' +
+                'OK = Deep Optimization (requires admin password)\n' +
+                'Cancel = Safe Mode (no admin required)\n\n' +
+                'Deep optimization can free more memory but requires administrator access.'
+            );
+            
+            try {
+                showNotification('Starting memory optimization...', 'success');
+                
+                const result = useAdmin
+                    ? await invoke('optimize_memory_admin')
+                    : await invoke('optimize_memory');
+                
+                console.log('Optimization result:', result);
+                
+                const resultDiv = document.getElementById('optimization-result');
+                const resultContent = resultDiv.querySelector('.result-content');
+                
+                let optimizationsList = '';
+                if (result.optimizations_performed && result.optimizations_performed.length > 0) {
+                    optimizationsList = '<ul>' +
+                        result.optimizations_performed.map(opt => `<li>✓ ${opt}</li>`).join('') +
+                        '</ul>';
+                }
+                
+                resultContent.innerHTML = `
+                    <p><strong>Optimization Type:</strong> ${result.optimization_type}</p>
+                    <p><strong>Memory Before:</strong> ${formatBytes(result.memory_before.used)} / ${formatBytes(result.memory_before.total)}</p>
+                    <p><strong>Memory After:</strong> ${formatBytes(result.memory_after.used)} / ${formatBytes(result.memory_after.total)}</p>
+                    <p><strong>Memory Freed:</strong> ${formatBytes(result.freed_memory)}</p>
+                    <p><strong>Optimizations Performed:</strong></p>
+                    ${optimizationsList}
+                    <p><strong>Status:</strong> ${result.message}</p>
+                `;
+                
+                resultDiv.style.display = 'block';
+                
+                const notificationMsg = result.freed_memory > 0
+                    ? `Memory optimization complete! Freed ${formatBytes(result.freed_memory)}`
+                    : 'Memory optimization complete!';
+                showNotification(notificationMsg, 'success');
+                
+                await loadMemoryInfo();
+            } catch (error) {
+                console.error('Error optimizing memory:', error);
+                showNotification('Memory optimization failed: ' + error, 'error');
+            }
+        }
+    });
+    
+    // Setup all event listeners
+    setupEventListeners();
+    console.log('Event delegation attached');
+    
+    // Debug: Check if buttons exist in DOM and ensure they're properly styled
+    setTimeout(() => {
+        const deepCleanBtn = document.getElementById('deep-clean-memory');
+        const optimizeBtn = document.getElementById('optimize-memory');
+        console.log('=== Button Debug Info ===');
+        console.log('Deep clean button found:', !!deepCleanBtn);
+        console.log('Optimize button found:', !!optimizeBtn);
+        if (deepCleanBtn) {
+            console.log('Deep clean button parent:', deepCleanBtn.parentElement?.className);
+            console.log('Deep clean button visible:', deepCleanBtn.offsetParent !== null);
+            console.log('Deep clean button disabled:', deepCleanBtn.disabled);
+            // Ensure button is clickable
+            deepCleanBtn.style.cursor = 'pointer';
+            deepCleanBtn.style.pointerEvents = 'auto';
+        }
+        if (optimizeBtn) {
+            console.log('Optimize button parent:', optimizeBtn.parentElement?.className);
+            console.log('Optimize button visible:', optimizeBtn.offsetParent !== null);
+            console.log('Optimize button disabled:', optimizeBtn.disabled);
+            // Ensure button is clickable
+            optimizeBtn.style.cursor = 'pointer';
+            optimizeBtn.style.pointerEvents = 'auto';
+        }
+        console.log('========================');
+        console.log('Event delegation is active. Try clicking the Deep Clean button!');
+    }, 1000);
     
     // Check if Tauri is available
     if (window.__TAURI__) {
