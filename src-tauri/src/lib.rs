@@ -4,7 +4,7 @@ mod memory_optimizer;
 
 use system_info::{SystemMonitor, SystemInfo, MemoryInfo, ProcessInfo, DiskInfo, CpuInfo};
 use file_cleaner::{FileCleaner, CleanableFile, CleaningReport};
-use memory_optimizer::{MemoryOptimizer, MemoryOptimizationResult};
+use memory_optimizer::{MemoryOptimizer, MemoryOptimizationResult, MemoryStats};
 use std::sync::Mutex;
 use tauri::State;
 
@@ -113,6 +113,13 @@ fn get_memory_pressure(state: State<AppState>) -> Result<f32, String> {
 }
 
 #[tauri::command]
+fn get_memory_stats(state: State<AppState>) -> Result<MemoryStats, String> {
+    // We don't need the optimizer instance, but lock to keep API consistent
+    drop(state.memory_optimizer.lock().map_err(|e| e.to_string())?);
+    MemoryOptimizer::get_memory_stats()
+}
+
+#[tauri::command]
 fn get_network_info(state: State<AppState>) -> Result<Vec<system_info::NetworkInfo>, String> {
     let monitor = state.system_monitor.lock().map_err(|e| e.to_string())?;
     Ok(monitor.get_network_info())
@@ -163,11 +170,12 @@ pub fn run() {
             optimize_memory_admin,
             clear_inactive_memory,
             get_memory_pressure,
+            get_memory_stats,
             get_network_info,
             get_temperatures,
             kill_memory_intensive_processes,
-            optimize_swap
-        ])
+               optimize_swap
+         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

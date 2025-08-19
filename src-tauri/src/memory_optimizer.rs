@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use libc;
 use std::thread;
 use std::time::Duration;
@@ -251,42 +253,98 @@ impl MemoryOptimizer {
         let mut message = String::new();
         let mut optimizations_performed = Vec::new();
         
-        // Execute individual admin commands with proper error handling
-        // 1. Purge memory (this is the most important command)
-        let purge_script = r#"do shell script "purge" with administrator privileges"#;
-        
-        match Command::new("osascript")
-            .arg("-e")
-            .arg(purge_script)
-            .output()
-        {
+        // Build a single privileged script to run all admin-required tasks
+        let script_path = "/tmp/macos_optimizer_deep_clean.sh";
+        let shell_script = r#"#!/bin/bash
+set -euo pipefail
+
+# Helper to run a step and echo a marker
+run() {
+  local label="$1"; shift
+  if "$@"; then
+    echo "OK:${label}"
+  else
+    echo "ERR:${label}"
+  fi
+}
+
+# Admin-required tasks (with markers)
+run PURGE purge
+run DNS dscacheutil -flushcache
+run MDNS killall -HUP mDNSResponder
+run CLEAR_SYS_CACHE bash -lc 'rm -rf /Library/Caches/* && rm -rf /private/var/folders/*/C/* && rm -rf /private/var/folders/*/*/com.apple.LaunchServices*'
+run CLEAR_SWAP bash -lc 'rm -f /private/var/vm/swapfile*'
+run LSREGISTER "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister" -kill -r -domain local -domain system -domain user
+run ATSUTIL atsutil databases -remove
+run KEXT_TOUCH touch /System/Library/Extensions
+run KEXTCACHE kextcache -update-volume /
+run PERIODIC periodic daily weekly monthly
+
+# Restart common UI services (markers too)
+run RESTART_Dock killall -KILL Dock
+run RESTART_Finder killall -KILL Finder
+run RESTART_SysUIS killall -KILL SystemUIServer
+run RESTART_cfprefsd killall cfprefsd
+"#;
+
+        // Write script to disk and make it executable
+        fs::write(script_path, shell_script).map_err(|e| format!("Failed to write admin script: {}", e))?;
+        if let Ok(meta) = fs::metadata(script_path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = fs::set_permissions(script_path, perms);
+        }
+
+        // One admin prompt for the whole run
+        let applescript = format!(r#"with timeout of 1200 seconds
+  do shell script "{}" with administrator privileges
+end timeout"#, script_path);
+
+        match Command::new("osascript").arg("-e").arg(applescript).output() {
             Ok(output) => {
                 if output.status.success() {
-                    optimizations_performed.push("Purged memory and disk cache (admin)".to_string());
-                    message.push_str("Successfully purged memory\n");
-                    success = true;
-                } else {
-                    let error = String::from_utf8_lossy(&output.stderr);
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    eprintln!("Purge failed - stderr: {}, stdout: {}", error, stdout);
-                    message.push_str(&format!("Purge failed: {} {}\n", error, stdout));
-                    
-                    // If user cancelled, we'll see specific error
-                    if error.contains("canceled") || error.contains("cancelled") || error.contains("-128") {
+                    // Map markers to human-friendly labels
+                    let mapping = vec![
+                        ("OK:PURGE", "Purged memory and disk cache (admin)"),
+                        ("OK:DNS", "Flushed DNS cache (admin)"),
+                        ("OK:MDNS", "Signaled mDNSResponder (admin)"),
+                        ("OK:CLEAR_SYS_CACHE", "Cleared system caches (admin)"),
+                        ("OK:CLEAR_SWAP", "Cleared swap files (admin)"),
+                        ("OK:LSREGISTER", "Reset Launch Services database (admin)"),
+                        ("OK:ATSUTIL", "Cleared font caches (admin)"),
+                        ("OK:KEXT_TOUCH", "Touched extensions directory (admin)"),
+                        ("OK:KEXTCACHE", "Rebuilt kernel extension cache (admin)"),
+                        ("OK:PERIODIC", "Ran maintenance scripts (admin)"),
+                        ("OK:RESTART_Dock", "Restarted Dock"),
+                        ("OK:RESTART_Finder", "Restarted Finder"),
+                        ("OK:RESTART_SysUIS", "Restarted SystemUIServer"),
+                        ("OK:RESTART_cfprefsd", "Restarted cfprefsd"),
+                    ];
+                    for (marker, label) in mapping {
+                        if stdout.contains(marker) {
+                            optimizations_performed.push(label.to_string());
+                        }
+                    }
+                    message.push_str("Deep clean script executed\n");
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    // Detect cancellation
+                    if stderr.contains("canceled") || stderr.contains("cancelled") || stderr.contains("-128") {
                         message.push_str("User cancelled admin authentication\n");
                         success = false;
-                        // Don't continue with other admin operations if user cancelled
-                        
-                        // But still do non-admin optimizations
+
                         if let Ok(regular_result) = self.optimize_memory() {
                             optimizations_performed.extend(regular_result.optimizations_performed);
                             message.push_str(&format!("\nPerformed standard optimizations instead:\n{}\n", regular_result.message));
                         }
-                        
+
                         thread::sleep(Duration::from_secs(3));
                         let memory_after = Self::get_memory_stats()?;
                         let freed_memory = (memory_after.available as i64) - (memory_before.available as i64);
-                        
+
+                        let _ = fs::remove_file(script_path);
                         return Ok(MemoryOptimizationResult {
                             memory_before,
                             memory_after,
@@ -296,145 +354,39 @@ impl MemoryOptimizer {
                             message: message.trim().to_string(),
                             optimizations_performed,
                         });
+                    } else {
+                        eprintln!("Deep clean script failed - stderr: {}, stdout: {}", stderr, stdout);
+                        message.push_str(&format!("Deep clean script failed: {} {}\n", stderr, stdout));
+                        success = false;
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Failed to execute purge command: {}", e);
-                message.push_str(&format!("Failed to execute purge: {}\n", e));
+                eprintln!("Failed to run admin script: {}", e);
+                message.push_str(&format!("Failed to run admin script: {}\n", e));
                 success = false;
             }
         }
-        
-        // 2. Clear DNS cache
-        let dns_script = r#"do shell script "dscacheutil -flushcache && killall -HUP mDNSResponder" with administrator privileges"#;
-        
-        if let Ok(output) = Command::new("osascript")
-            .arg("-e")
-            .arg(dns_script)
-            .output()
-        {
-            if output.status.success() {
-                optimizations_performed.push("Flushed DNS cache (admin)".to_string());
-                message.push_str("Flushed DNS cache\n");
-            }
-        }
-        
-        // 3. Clear system caches - use separate commands for better control
-        let clear_caches_script = r#"do shell script "rm -rf /Library/Caches/* && rm -rf /private/var/folders/*/C/* && rm -rf /private/var/folders/*/*/com.apple.LaunchServices*" with administrator privileges"#;
-        
-        if let Ok(output) = Command::new("osascript")
-            .arg("-e")
-            .arg(clear_caches_script)
-            .output()
-        {
-            if output.status.success() {
-                optimizations_performed.push("Cleared system caches (admin)".to_string());
-                message.push_str("Cleared system caches\n");
-            }
-        }
-        
-        // 4. Clear swap files (if they exist)
-        let swap_script = r#"do shell script "rm -f /private/var/vm/swapfile*" with administrator privileges"#;
-        
-        if let Ok(output) = Command::new("osascript")
-            .arg("-e")
-            .arg(swap_script)
-            .output()
-        {
-            if output.status.success() {
-                optimizations_performed.push("Cleared swap files (admin)".to_string());
-                message.push_str("Cleared swap files\n");
-            }
-        }
-        
-        // 5. Reset Launch Services database
-        let launch_services_script = r#"do shell script "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -kill -r -domain local -domain system -domain user" with administrator privileges"#;
-        
-        if let Ok(output) = Command::new("osascript")
-            .arg("-e")
-            .arg(launch_services_script)
-            .output()
-        {
-            if output.status.success() {
-                optimizations_performed.push("Reset Launch Services database (admin)".to_string());
-                message.push_str("Reset Launch Services database\n");
-            }
-        }
-        
-        // 6. Clear font caches
-        let font_script = r#"do shell script "atsutil databases -remove" with administrator privileges"#;
-        
-        if let Ok(output) = Command::new("osascript")
-            .arg("-e")
-            .arg(font_script)
-            .output()
-        {
-            if output.status.success() {
-                optimizations_performed.push("Cleared font caches (admin)".to_string());
-                message.push_str("Cleared font caches\n");
-            }
-        }
-        
-        // 7. Kill and restart memory-intensive services
-        let restart_services_script = r#"do shell script "killall -KILL Dock; killall -KILL Finder; killall -KILL SystemUIServer; killall cfprefsd" with administrator privileges"#;
-        
-        if let Ok(output) = Command::new("osascript")
-            .arg("-e")
-            .arg(restart_services_script)
-            .output()
-        {
-            if output.status.success() {
-                optimizations_performed.push("Restarted system services (admin)".to_string());
-                message.push_str("Restarted system services\n");
-            }
-        }
-        
-        // 8. Clear kernel extension cache
-        let kext_script = r#"do shell script "touch /System/Library/Extensions && kextcache -update-volume /" with administrator privileges"#;
-        
-        if let Ok(output) = Command::new("osascript")
-            .arg("-e")
-            .arg(kext_script)
-            .output()
-        {
-            if output.status.success() {
-                optimizations_performed.push("Rebuilt kernel extension cache (admin)".to_string());
-                message.push_str("Rebuilt kernel extension cache\n");
-            }
-        }
-        
-        // 9. Run maintenance scripts
-        let maintenance_script = r#"do shell script "periodic daily weekly monthly" with administrator privileges"#;
-        
-        if let Ok(output) = Command::new("osascript")
-            .arg("-e")
-            .arg(maintenance_script)
-            .output()
-        {
-            if output.status.success() {
-                optimizations_performed.push("Ran maintenance scripts (admin)".to_string());
-                message.push_str("Ran maintenance scripts\n");
-            }
-        }
-        
+
         // Also perform non-admin optimizations
         if let Ok(regular_result) = self.optimize_memory() {
             optimizations_performed.extend(regular_result.optimizations_performed);
             message.push_str(&format!("\nAlso performed standard optimizations:\n{}\n", regular_result.message));
         }
-        
-        // Wait longer for admin changes to take effect
+
+        // Wait for changes to settle
         thread::sleep(Duration::from_secs(5));
-        
+
         let memory_after = Self::get_memory_stats()?;
         let freed_memory = (memory_after.available as i64) - (memory_before.available as i64);
-        
+
         if optimizations_performed.is_empty() {
             success = false;
             message = "No optimizations could be performed. Admin access may have been denied.".to_string();
         }
-        
+
+        let _ = fs::remove_file(script_path);
+
         Ok(MemoryOptimizationResult {
             memory_before,
             memory_after,

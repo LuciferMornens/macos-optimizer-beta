@@ -83,18 +83,18 @@ async function loadDashboard() {
         // Load system info
         const systemInfo = await invoke('get_system_info');
         console.log('System info:', systemInfo);
-        const memoryInfo = await invoke('get_memory_info');
-        console.log('Memory info:', memoryInfo);
+        const memStats = await invoke('get_memory_stats');
+        console.log('Memory stats:', memStats);
         const cpuInfo = await invoke('get_cpu_info');
         console.log('CPU info:', cpuInfo);
         const disks = await invoke('get_disks');
         console.log('Disks:', disks);
         
-        // Update memory stats
-        const memoryPercent = (memoryInfo.used_memory / memoryInfo.total_memory * 100).toFixed(1);
+        // Update memory stats (unified source)
+        const memoryPercent = (memStats.used / memStats.total * 100).toFixed(1);
         document.getElementById('memory-usage').textContent = `${memoryPercent}%`;
         document.getElementById('memory-detail').textContent = 
-            `${formatBytes(memoryInfo.used_memory)} / ${formatBytes(memoryInfo.total_memory)}`;
+            `${formatBytes(memStats.used)} / ${formatBytes(memStats.total)}`;
         document.getElementById('memory-progress').style.width = `${memoryPercent}%`;
         
         // Update CPU stats
@@ -129,13 +129,15 @@ async function loadDashboard() {
 // Memory management functions
 async function loadMemoryInfo() {
     try {
-        const memoryInfo = await invoke('get_memory_info');
+        // Use unified memory stats for accuracy across UI and results
+        const stats = await invoke('get_memory_stats');
+        const usedRatio = stats.total > 0 ? (stats.used / stats.total) : 0;
         
-        document.getElementById('total-memory').textContent = formatBytes(memoryInfo.total_memory);
-        document.getElementById('used-memory').textContent = formatBytes(memoryInfo.used_memory);
-        document.getElementById('available-memory').textContent = formatBytes(memoryInfo.available_memory);
-        document.getElementById('memory-pressure').textContent = `${memoryInfo.memory_pressure.toFixed(1)}%`;
-        document.getElementById('swap-used').textContent = formatBytes(memoryInfo.used_swap);
+        document.getElementById('total-memory').textContent = formatBytes(stats.total);
+        document.getElementById('used-memory').textContent = formatBytes(stats.used);
+        document.getElementById('available-memory').textContent = formatBytes(stats.available);
+        document.getElementById('memory-pressure').textContent = `${(usedRatio * 100).toFixed(1)}%`;
+        document.getElementById('swap-used').textContent = formatBytes(stats.swap_used);
         
         // Draw memory chart (simple visual representation)
         const canvas = document.getElementById('memory-chart');
@@ -152,7 +154,7 @@ async function loadMemoryInfo() {
             const centerY = height / 2;
             const radius = Math.min(width, height) / 3;
             
-            const usedAngle = (memoryInfo.used_memory / memoryInfo.total_memory) * Math.PI * 2;
+            const usedAngle = usedRatio * Math.PI * 2;
             
             // Used memory
             ctx.beginPath();
@@ -173,7 +175,7 @@ async function loadMemoryInfo() {
             ctx.font = 'bold 24px -apple-system';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(`${memoryInfo.memory_pressure.toFixed(0)}%`, centerX, centerY);
+            ctx.fillText(`${(usedRatio * 100).toFixed(0)}%`, centerX, centerY);
         }
     } catch (error) {
         console.error('Error loading memory info:', error);
