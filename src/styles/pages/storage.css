@@ -1,0 +1,414 @@
+/* ========================================
+   Storage Page Styles
+   ======================================== */
+
+/* Storage Overview */
+.storage-overview {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-xl);
+    margin-bottom: var(--space-xl);
+}
+
+@media (max-width: 1024px) {
+    .storage-overview {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Scan Progress */
+.scan-progress {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    padding: var(--space-2xl);
+    text-align: center;
+    margin-bottom: var(--space-xl);
+    position: relative;
+    overflow: hidden;
+}
+
+.scan-progress::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, var(--gray-100), transparent);
+    animation: scan-sweep 2s linear infinite;
+}
+
+@keyframes scan-sweep {
+    0% {
+        left: -100%;
+    }
+    100% {
+        left: 100%;
+    }
+}
+
+.scan-icon {
+    font-size: 3rem;
+    margin-bottom: var(--space-lg);
+    color: var(--text-secondary);
+    animation: rotate 2s linear infinite;
+}
+
+@keyframes rotate {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.scan-progress p {
+    margin-top: var(--space-md);
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.scan-progress-bar {
+    width: 100%;
+    max-width: 400px;
+    margin: var(--space-lg) auto;
+}
+
+/* Cleaning Report */
+.cleaning-report {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    padding: var(--space-xl);
+    position: relative;
+}
+
+.cleaning-report::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background: var(--gradient-strong);
+}
+
+/* Report Summary */
+.report-summary {
+    margin-bottom: var(--space-xl);
+    padding-bottom: var(--space-xl);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.summary-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: var(--space-md);
+}
+
+.summary-stats {
+    display: flex;
+    gap: var(--space-xl);
+    margin-top: var(--space-lg);
+}
+
+.summary-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.summary-stat .value {
+    font-size: 2rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    background: var(--gradient-strong);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: var(--space-xs);
+}
+
+.summary-stat .label {
+    color: var(--text-tertiary);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Categories List */
+.categories-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-md);
+    margin-bottom: var(--space-xl);
+}
+
+/* Smart Selection Controls */
+.smart-selection {
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+    padding: var(--space-xl);
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-xl);
+    border: 1px solid var(--border-subtle);
+    position: relative;
+}
+
+.smart-selection::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--texture-lines);
+    opacity: 0.02;
+    border-radius: var(--radius-xl);
+    pointer-events: none;
+}
+
+.smart-selection h4 {
+    margin-bottom: var(--space-lg);
+    font-size: 1rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.selection-controls {
+    display: flex;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-lg);
+    flex-wrap: wrap;
+}
+
+.selection-info {
+    display: flex;
+    gap: var(--space-xl);
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.selection-info span {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+#selected-count {
+    color: var(--text-primary);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+#selected-size {
+    color: var(--text-primary);
+    font-weight: 700;
+    font-family: var(--font-mono);
+}
+
+/* Files List Container */
+.files-list {
+    max-height: 500px;
+    overflow-y: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--space-md);
+    background: var(--bg-elevated);
+    position: relative;
+}
+
+.files-list::before {
+    content: '';
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 20px;
+    background: linear-gradient(to bottom, var(--bg-elevated), transparent);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.files-list::after {
+    content: '';
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 20px;
+    background: linear-gradient(to top, var(--bg-elevated), transparent);
+    pointer-events: none;
+}
+
+/* File Checkbox Custom Style */
+.file-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin-right: var(--space-md);
+    flex-shrink: 0;
+    appearance: none;
+    background: var(--bg-elevated);
+    border: 2px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    position: relative;
+    transition: all var(--transition-fast);
+}
+
+.file-item input[type="checkbox"]:checked {
+    background: var(--gray-900);
+    border-color: var(--gray-900);
+}
+
+.file-item input[type="checkbox"]:checked::after {
+    content: '✓';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--pure-white);
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.file-item input[type="checkbox"]:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Storage Space Visualization */
+.storage-visualization {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    padding: var(--space-xl);
+    margin-bottom: var(--space-xl);
+}
+
+.storage-bar {
+    width: 100%;
+    height: 40px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+    position: relative;
+    margin: var(--space-lg) 0;
+}
+
+.storage-segments {
+    display: flex;
+    height: 100%;
+}
+
+.storage-segment {
+    height: 100%;
+    position: relative;
+    transition: all var(--transition-base);
+}
+
+.storage-segment:hover {
+    filter: brightness(1.1);
+}
+
+.storage-segment.system {
+    background: var(--gray-800);
+}
+
+.storage-segment.apps {
+    background: var(--gray-600);
+}
+
+.storage-segment.documents {
+    background: var(--gray-400);
+}
+
+.storage-segment.cache {
+    background: var(--gray-300);
+}
+
+.storage-segment.free {
+    background: var(--gray-100);
+}
+
+.storage-legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--space-md);
+    margin-top: var(--space-lg);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.legend-color {
+    width: 16px;
+    height: 16px;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+}
+
+.legend-label {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.legend-size {
+    margin-left: auto;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+}
+
+/* Cleaning Actions */
+.cleaning-actions {
+    display: flex;
+    gap: var(--space-md);
+    margin-top: var(--space-xl);
+    padding-top: var(--space-xl);
+    border-top: 1px solid var(--border-subtle);
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .scan-progress::before {
+        background: linear-gradient(90deg, transparent, var(--gray-800), transparent);
+    }
+    
+    .file-item input[type="checkbox"]:checked {
+        background: var(--gray-100);
+        border-color: var(--gray-100);
+    }
+    
+    .file-item input[type="checkbox"]:checked::after {
+        color: var(--gray-900);
+    }
+    
+    .storage-segment.system {
+        background: var(--gray-200);
+    }
+    
+    .storage-segment.apps {
+        background: var(--gray-400);
+    }
+    
+    .storage-segment.documents {
+        background: var(--gray-600);
+    }
+    
+    .storage-segment.cache {
+        background: var(--gray-700);
+    }
+    
+    .storage-segment.free {
+        background: var(--gray-850);
+    }
+}

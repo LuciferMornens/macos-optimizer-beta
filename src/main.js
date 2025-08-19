@@ -28,46 +28,34 @@ function inlineConfirm(message, { title = 'Confirm', kind = 'warning' } = {}) {
 
         const overlay = document.createElement('div');
         overlay.id = 'inline-confirm-overlay';
-        overlay.style.position = 'fixed';
-        overlay.style.inset = '0';
-        overlay.style.background = 'rgba(0,0,0,0.5)';
-        overlay.style.display = 'flex';
-        overlay.style.alignItems = 'center';
-        overlay.style.justifyContent = 'center';
-        overlay.style.zIndex = '9999';
+        overlay.className = 'modal-overlay';
 
         const card = document.createElement('div');
-        card.style.background = '#1c1c1e';
-        card.style.color = '#fff';
-        card.style.padding = '20px';
-        card.style.borderRadius = '12px';
-        card.style.maxWidth = '480px';
-        card.style.width = 'calc(100% - 40px)';
-        card.style.boxShadow = '0 10px 30px rgba(0,0,0,0.3)';
+        card.className = `modal-card ${kind === 'warning' ? 'modal-danger' : ''}`;
 
+        const header = document.createElement('div');
+        header.className = 'modal-header';
+        
         const heading = document.createElement('h4');
+        heading.className = 'modal-title';
         heading.textContent = title || 'Confirm';
-        heading.style.margin = '0 0 8px';
-        heading.style.fontSize = '16px';
+        
+        header.appendChild(heading);
 
-        const body = document.createElement('p');
-        body.textContent = '';
-        body.style.margin = '0 0 16px';
-        body.style.whiteSpace = 'pre-line';
+        const body = document.createElement('div');
+        body.className = 'modal-body';
         body.textContent = message;
 
         const actions = document.createElement('div');
-        actions.style.display = 'flex';
-        actions.style.gap = '8px';
-        actions.style.justifyContent = 'flex-end';
+        actions.className = 'modal-actions';
 
         const cancelBtn = document.createElement('button');
         cancelBtn.textContent = 'Cancel';
-        cancelBtn.className = 'btn-secondary';
+        cancelBtn.className = 'btn btn-secondary';
 
         const okBtn = document.createElement('button');
-        okBtn.textContent = 'OK';
-        okBtn.className = kind === 'warning' ? 'btn-danger' : 'btn-primary';
+        okBtn.textContent = kind === 'warning' ? 'Confirm' : 'OK';
+        okBtn.className = kind === 'warning' ? 'btn btn-danger' : 'btn btn-primary';
 
         const cleanup = () => {
             document.removeEventListener('keydown', onKey);
@@ -88,7 +76,7 @@ function inlineConfirm(message, { title = 'Confirm', kind = 'warning' } = {}) {
 
         actions.appendChild(cancelBtn);
         actions.appendChild(okBtn);
-        card.appendChild(heading);
+        card.appendChild(header);
         card.appendChild(body);
         card.appendChild(actions);
         overlay.appendChild(card);

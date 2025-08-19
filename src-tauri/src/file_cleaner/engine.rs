@@ -122,11 +122,23 @@ impl FileCleaner {
                         }
                     }
 
-                    // Age filter
+                    // Age filter (use creation time for Downloads/Desktop categories to avoid misclassifying newly downloaded files with old modified times)
                     if let Some(days) = min_age {
-                        if let Ok(modified) = metadata.modified() {
-                            let modified_time = DateTime::<Utc>::from(modified);
-                            if now.signed_duration_since(modified_time) < Duration::days(days) {
+                        // Prefer file creation time for Downloads/Desktop-related categories; fallback to modified time
+                        let relevant_time = (|| {
+                            let name_lower = rule.name.to_lowercase();
+                            if name_lower.contains("downloads") || name_lower.contains("desktop") {
+                                if let Ok(created) = metadata.created() {
+                                    return Some(DateTime::<Utc>::from(created));
+                                }
+                            }
+                            metadata
+                                .modified()
+                                .ok()
+                                .map(|t| DateTime::<Utc>::from(t))
+                        })();
+                        if let Some(file_time) = relevant_time {
+                            if now.signed_duration_since(file_time) < Duration::days(days) {
                                 continue;
                             }
                         }

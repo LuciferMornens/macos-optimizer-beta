@@ -54,7 +54,7 @@ pub(crate) fn is_safe_to_delete(path: &Path) -> bool {
         }
     }
 
-    // Helper: compute file age in days
+    // Helper: compute file age in days (by modified time)
     let file_age_days = || -> Option<i64> {
         if let Ok(md) = fs::metadata(path) {
             if let Ok(modified) = md.modified() {
@@ -62,6 +62,21 @@ pub(crate) fn is_safe_to_delete(path: &Path) -> bool {
                 return Some(
                     Utc::now()
                         .signed_duration_since(modified_time)
+                        .num_days(),
+                );
+            }
+        }
+        None
+    };
+
+    // Helper: compute file age in days using creation time if available
+    let file_age_days_created = || -> Option<i64> {
+        if let Ok(md) = fs::metadata(path) {
+            if let Ok(created) = md.created() {
+                let created_time = DateTime::<Utc>::from(created);
+                return Some(
+                    Utc::now()
+                        .signed_duration_since(created_time)
                         .num_days(),
                 );
             }
@@ -145,13 +160,13 @@ pub(crate) fn is_safe_to_delete(path: &Path) -> bool {
         }
     }
 
-    // Old installers in Downloads: only .dmg/.pkg, 30d+
+    // Old installers in Downloads: only .dmg/.pkg, 30d+ (measure by creation time to avoid server-preserved mtime)
     let mut is_old_installer = false;
     if let Some(ext) = path.extension() {
         let ext = ext.to_string_lossy().to_lowercase();
         let in_downloads = path_str.contains("/downloads/") || path_str.ends_with("/downloads");
         if in_downloads && (ext == "dmg" || ext == "pkg") {
-            if let Some(d) = file_age_days() {
+            if let Some(d) = file_age_days_created().or_else(|| file_age_days()) {
                 if d >= 30 {
                     is_old_installer = true;
                 }
@@ -269,12 +284,23 @@ pub(crate) fn calculate_safety_score(
 
     // File age adjustment
     if let Ok(metadata) = fs::metadata(path) {
-        if let Ok(modified) = metadata.modified() {
-            let modified_time = DateTime::<Utc>::from(modified);
-            let age_days = Utc::now()
-                .signed_duration_since(modified_time)
-                .num_days();
+        // Prefer creation time for Downloads/Desktop-related categories; fallback to modified time
+        let age_days_opt = (|| {
+            let name_lower = category.to_lowercase();
+            if name_lower.contains("downloads") || name_lower.contains("desktop") {
+                if let Ok(created) = metadata.created() {
+                    let created_time = DateTime::<Utc>::from(created);
+                    return Some(Utc::now().signed_duration_since(created_time).num_days());
+                }
+            }
+            if let Ok(modified) = metadata.modified() {
+                let modified_time = DateTime::<Utc>::from(modified);
+                return Some(Utc::now().signed_duration_since(modified_time).num_days());
+            }
+            None
+        })();
 
+        if let Some(age_days) = age_days_opt {
             // Increase safety for very old files in safe categories
             if age_days > 90 && score >= 80 {
                 score = score.min(100);
