@@ -1,8 +1,15 @@
 // src/memory_optimizer.rs
 
 use serde::{Deserialize, Serialize};
-use std::thread;
-use std::time::Duration;
+use tokio::time::{sleep, Duration};
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ProgressUpdate {
+    pub operation: String,
+    pub stage: String,
+    pub progress: f32,
+    pub message: String,
+}
 
 // Internal modules backing this facade.
 // Keep this file as the stable entry point that others import.
@@ -47,7 +54,7 @@ impl MemoryOptimizer {
     }
 
     // Public API unchanged: orchestrates non-admin steps via non_admin module.
-    pub fn optimize_memory(&self) -> Result<MemoryOptimizationResult, String> {
+    pub async fn optimize_memory(&self) -> Result<MemoryOptimizationResult, String> {
         let memory_before = Self::get_memory_stats()?;
 
         let mut success = true;
@@ -55,7 +62,7 @@ impl MemoryOptimizer {
         let mut optimizations_performed = Vec::new();
 
         // 1. Clear inactive memory pages (non-sudo)
-        if let Ok(freed) = non_admin::clear_inactive_memory_safe() {
+        if let Ok(freed) = non_admin::clear_inactive_memory_safe().await {
             if freed > 0 {
                 optimizations_performed.push(format!("Cleared {} MB of inactive memory", freed / (1024 * 1024)));
                 message.push_str(&format!("Freed {} MB from inactive memory\n", freed / (1024 * 1024)));
@@ -63,43 +70,43 @@ impl MemoryOptimizer {
         }
 
         // 2. Optimize file system caches
-        if let Ok(_) = non_admin::optimize_file_caches() {
+        if let Ok(_) = non_admin::optimize_file_caches().await {
             optimizations_performed.push("Optimized file system caches".to_string());
             message.push_str("Optimized file system caches\n");
         }
 
         // 3. Clear application caches (non-sudo)
-        if let Ok(cleared) = non_admin::clear_app_caches() {
+        if let Ok(cleared) = non_admin::clear_app_caches().await {
             optimizations_performed.push(format!("Cleared {} application caches", cleared));
             message.push_str(&format!("Cleared {} application caches\n", cleared));
         }
 
         // 4. Optimize memory compression
-        if let Ok(_) = non_admin::optimize_memory_compression() {
+        if let Ok(_) = non_admin::optimize_memory_compression().await {
             optimizations_performed.push("Optimized memory compression".to_string());
             message.push_str("Optimized memory compression\n");
         }
 
         // 5. Clear DNS and network caches (non-sudo versions)
-        if let Ok(_) = non_admin::clear_network_caches_safe() {
+        if let Ok(_) = non_admin::clear_network_caches_safe().await {
             optimizations_performed.push("Cleared network caches".to_string());
             message.push_str("Cleared network caches\n");
         }
 
         // 6. Trigger garbage collection in running apps
-        if let Ok(apps) = non_admin::trigger_app_gc() {
+        if let Ok(apps) = non_admin::trigger_app_gc().await {
             optimizations_performed.push(format!("Triggered GC in {} apps", apps));
             message.push_str(&format!("Triggered garbage collection in {} apps\n", apps));
         }
 
         // 7. Clear temporary memory allocations
-        if let Ok(_) = non_admin::clear_temp_allocations() {
+        if let Ok(_) = non_admin::clear_temp_allocations().await {
             optimizations_performed.push("Cleared temporary allocations".to_string());
             message.push_str("Cleared temporary memory allocations\n");
         }
 
-        // Wait for optimizations to take effect
-        thread::sleep(Duration::from_secs(2));
+        // Wait for optimizations to take effect with shorter delay
+        sleep(Duration::from_millis(500)).await;
 
         let memory_after = Self::get_memory_stats()?;
         let freed_memory = (memory_after.available as i64) - (memory_before.available as i64);
@@ -121,7 +128,7 @@ impl MemoryOptimizer {
     }
 
     // Public API unchanged: delegates privileged work to admin module and keeps the same flow.
-    pub fn optimize_memory_with_admin(&self, _use_gui_auth: bool) -> Result<MemoryOptimizationResult, String> {
+    pub async fn optimize_memory_with_admin(&self, _use_gui_auth: bool) -> Result<MemoryOptimizationResult, String> {
         let memory_before = Self::get_memory_stats()?;
 
         let mut success = true;
@@ -129,7 +136,7 @@ impl MemoryOptimizer {
         let mut optimizations_performed = Vec::new();
 
         // Run the deep-clean privileged script in one go.
-        let outcome = admin::run_deep_clean();
+        let outcome = admin::run_deep_clean().await;
 
         if outcome.success {
             // Map markers to human-friendly labels
@@ -161,12 +168,12 @@ impl MemoryOptimizer {
             success = false;
 
             // Fallback to non-admin optimization
-            if let Ok(regular_result) = self.optimize_memory() {
+            if let Ok(regular_result) = self.optimize_memory().await {
                 optimizations_performed.extend(regular_result.optimizations_performed);
                 message.push_str(&format!("\nPerformed standard optimizations instead:\n{}\n", regular_result.message));
             }
 
-            thread::sleep(Duration::from_secs(3));
+            sleep(Duration::from_millis(500)).await;
             let memory_after = Self::get_memory_stats()?;
             let freed_memory = (memory_after.available as i64) - (memory_before.available as i64);
 
@@ -186,13 +193,13 @@ impl MemoryOptimizer {
         }
 
         // Also perform non-admin optimizations
-        if let Ok(regular_result) = self.optimize_memory() {
+        if let Ok(regular_result) = self.optimize_memory().await {
             optimizations_performed.extend(regular_result.optimizations_performed);
             message.push_str(&format!("\nAlso performed standard optimizations:\n{}\n", regular_result.message));
         }
 
-        // Wait for changes to settle
-        thread::sleep(Duration::from_secs(5));
+        // Wait for changes to settle with reduced delay
+        sleep(Duration::from_secs(1)).await;
 
         let memory_after = Self::get_memory_stats()?;
         let freed_memory = (memory_after.available as i64) - (memory_before.available as i64);
@@ -214,8 +221,8 @@ impl MemoryOptimizer {
     }
 
     // Keep thin wrappers to preserve the public API exactly.
-    pub fn clear_inactive_memory(&self) -> Result<u64, String> {
-        non_admin::clear_inactive_memory_safe()
+    pub async fn clear_inactive_memory(&self) -> Result<u64, String> {
+        non_admin::clear_inactive_memory_safe().await
     }
 
     pub fn get_memory_pressure(&self) -> Result<f32, String> {
@@ -227,11 +234,11 @@ impl MemoryOptimizer {
         }
     }
 
-    pub fn optimize_swap(&self) -> Result<String, String> {
-        non_admin::optimize_swap()
+    pub async fn optimize_swap(&self) -> Result<String, String> {
+        non_admin::optimize_swap().await
     }
 
-    pub fn kill_memory_intensive_processes(&self, threshold_mb: u64) -> Result<Vec<String>, String> {
-        non_admin::kill_memory_intensive_processes(threshold_mb)
+    pub async fn kill_memory_intensive_processes(&self, threshold_mb: u64) -> Result<Vec<String>, String> {
+        non_admin::kill_memory_intensive_processes(threshold_mb).await
     }
 }

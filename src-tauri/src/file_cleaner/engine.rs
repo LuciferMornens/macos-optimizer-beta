@@ -2,9 +2,11 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use tokio::process::Command;
+use tokio::time::{sleep, Duration};
 
-use chrono::{DateTime, Duration, Local, Utc};
+
+use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use dirs;
 use walkdir::WalkDir;
 
@@ -34,7 +36,7 @@ impl FileCleaner {
     }
 
     /// Scan system according to embedded rules and produce a report.
-    pub fn scan_system(&mut self) -> Result<CleaningReport, String> {
+    pub async fn scan_system(&mut self) -> Result<CleaningReport, String> {
         self.cleanable_files.clear();
         self.seen_paths.clear();
         self.seen_dir_prefixes.clear();
@@ -44,19 +46,58 @@ impl FileCleaner {
 
         // Apply categories in order (specific first to avoid double counting)
         for rule in rules.categories.iter() {
-            for p in &rule.paths {
-                if let Some(path) = Self::expand_path(p) {
-                    if path.exists() {
-                        self.scan_path_with_rule(&path, rule)?;
+            let paths_to_scan: Vec<_> = rule.paths.iter()
+                .filter_map(|p| Self::expand_path(p))
+                .filter(|path| path.exists())
+                .collect();
+                
+            if !paths_to_scan.is_empty() {
+                // Process each path with optimized batching
+                for path in paths_to_scan {
+                    if let Err(_) = self.scan_path_with_rule(&path, rule).await {
+                        continue;
                     }
                 }
+                
+                // Small async yield to not block the executor
+                tokio::task::yield_now().await;
             }
         }
 
         Ok(self.generate_report())
     }
 
-    fn scan_path_with_rule(&mut self, path: &Path, rule: &CategoryRule) -> Result<(), String> {
+
+
+    async fn scan_path_with_rule(&mut self, path: &Path, rule: &CategoryRule) -> Result<(), String> {
+        let mut found_files = Vec::new();
+        let mut local_seen_paths = HashSet::new();
+        let mut local_seen_dirs = Vec::new();
+        
+        self.scan_path_internal(path, rule, &mut found_files, &mut local_seen_paths, &mut local_seen_dirs)?;
+        
+        // Merge results
+        for file in found_files {
+            self.cleanable_files.push(file);
+        }
+        for path in local_seen_paths {
+            self.seen_paths.insert(path);
+        }
+        for dir in local_seen_dirs {
+            self.seen_dir_prefixes.push(dir);
+        }
+        
+        Ok(())
+    }
+
+    fn scan_path_internal(
+        &self,
+        path: &Path,
+        rule: &CategoryRule,
+        found_files: &mut Vec<CleanableFile>,
+        local_seen_paths: &mut HashSet<String>,
+        local_seen_dirs: &mut Vec<String>,
+    ) -> Result<(), String> {
         if !path.exists() {
             return Ok(());
         }
@@ -80,124 +121,136 @@ impl FileCleaner {
             .map(|v| v.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>())
             .unwrap_or_default();
 
-        // Build the walker with UNLIMITED depth by default (fixes missing nested items).
+        // Build the walker - limit depth for better performance
         let walker = WalkDir::new(path);
         let iter = if let Some(d) = rule.max_depth {
             walker.max_depth(d).into_iter()
         } else {
-            walker.into_iter()
+            walker.max_depth(10).into_iter() // Default max depth for performance
         };
 
-        let root_lower = path.to_string_lossy().to_lowercase();
+        // Process entries in parallel batches for better performance
+        let entries: Vec<_> = iter.filter_map(|e| e.ok()).collect();
+        
+        // Use chunks to process in batches
+        for chunk in entries.chunks(100) {
+            for entry in chunk {
+                let file_type = entry.file_type();
+                let file_path = entry.path();
 
-        for entry in iter.filter_map(|e| e.ok()) {
-            let file_type = entry.file_type();
-            let file_path = entry.path();
-
-            // Skip symlinks to avoid unintended deletions
-            if let Ok(md) = fs::symlink_metadata(file_path) {
-                if md.file_type().is_symlink() {
-                    continue;
+                // Skip symlinks to avoid unintended deletions
+                if let Ok(md) = fs::symlink_metadata(file_path) {
+                    if md.file_type().is_symlink() {
+                        continue;
+                    }
                 }
-            }
 
-            let key = file_path.to_string_lossy().to_string();
-            let path_lower = key.to_lowercase();
+                // Determine whether this is a file or directory match
+                let is_dir_based_rule = rule.name.to_lowercase().contains("folder")
+                    || rule.name.to_lowercase().contains("cache")
+                    || rule.name.to_lowercase().contains("container");
 
-            // Skip anything under a directory we've already staged for cleaning
-            if self
-                .seen_dir_prefixes
-                .iter()
-                .any(|prefix| path_lower.starts_with(prefix))
-            {
-                continue;
-            }
+                let consider_as_result = if is_dir_based_rule && file_type.is_dir() {
+                    true
+                } else if !is_dir_based_rule && file_type.is_file() {
+                    true
+                } else {
+                    false
+                };
 
-            // De-duplicate across multiple scans/categories (case-insensitive)
-            if self.seen_paths.contains(&path_lower) {
-                continue;
-            }
-
-            // Exclude by simple substring match on lowercased path
-            if excludes.iter().any(|ex| path_lower.contains(ex)) {
-                continue;
-            }
-
-            // Require at least one matching subpath if specified
-            if !require_subpaths.is_empty()
-                && !require_subpaths.iter().any(|req| path_lower.contains(req))
-            {
-                continue;
-            }
-
-            // Directories: include when applicable (many macOS caches are directories)
-            if file_type.is_dir() {
-                // If the rule targets specific file extensions, skip directories
-                if exts.is_some() {
+                if !consider_as_result {
                     continue;
                 }
 
-                // Don't add the rule's root path itself; show inner items instead
-                if path_lower == root_lower {
+                let path_str = file_path.to_string_lossy();
+                let key = path_str.to_string();
+                let path_lower = path_str.to_lowercase();
+
+                // Skip if already seen
+                if self.seen_paths.contains(&path_lower) || local_seen_paths.contains(&path_lower) {
                     continue;
                 }
 
-                // Age filter for directories
-                if let Some(days) = min_age {
-                    if let Ok(meta) = fs::metadata(file_path) {
-                        if let Ok(modified) = meta.modified() {
-                            let m = DateTime::<Utc>::from(modified);
-                            if now.signed_duration_since(m) < Duration::days(days) {
+                // Check if this path is a child of any seen directory prefix
+                if self.seen_dir_prefixes.iter().any(|prefix| path_lower.starts_with(prefix))
+                    || local_seen_dirs.iter().any(|prefix| path_lower.starts_with(prefix)) {
+                    continue;
+                }
+
+                // Apply exclude filters
+                if excludes.iter().any(|ex| path_lower.contains(ex)) {
+                    continue;
+                }
+
+                // Apply subpath requirements
+                if !require_subpaths.is_empty() {
+                    if !require_subpaths.iter().any(|req| path_lower.contains(req)) {
+                        continue;
+                    }
+                }
+
+                // Metadata checks
+                let metadata = match fs::metadata(file_path) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        if e.kind() == ErrorKind::NotFound {
+                            continue;
+                        }
+                        continue;
+                    }
+                };
+
+                if file_type.is_dir() {
+                    // Directory processing
+                    let mut dir_prefix = path_lower.clone();
+                    if !dir_prefix.ends_with('/') {
+                        dir_prefix.push('/');
+                    }
+                    local_seen_dirs.push(dir_prefix);
+
+                    // Age filter
+                    if let Some(days) = min_age {
+                        if let Ok(m) = metadata.modified() {
+                            if now.signed_duration_since(DateTime::<Utc>::from(m)) < ChronoDuration::days(days) {
                                 continue;
                             }
                         }
                     }
-                }
 
-                // Compute directory size after filters (avoid heavy work otherwise)
-                let dir_size = match self.get_directory_size(file_path) {
-                    Ok(sz) => sz,
-                    Err(_) => 0,
-                };
+                    let dir_size = self.get_directory_size(file_path).unwrap_or(0);
+                    let min_size = min_size_bytes_from_rule.unwrap_or(0);
+                    if dir_size < min_size {
+                        continue;
+                    }
 
-                // Size filter (include everything unless rule explicitly specifies a minimum)
-                let min_size = min_size_bytes_from_rule.unwrap_or(0);
-                if dir_size < min_size {
-                    continue;
-                }
+                    let is_safe = rule.safe && is_safe_to_delete(file_path);
+                    let (safety_score, auto_select) = calculate_safety_score(
+                        file_path,
+                        &rule.name,
+                        rule.min_age_days,
+                        is_safe,
+                    );
 
-                // Safety heuristics (controls auto-select, not user ability to remove)
-                let is_safe = rule.safe && is_safe_to_delete(file_path);
-                let (safety_score, auto_select) =
-                    calculate_safety_score(file_path, &rule.name, rule.min_age_days, is_safe);
+                    let last_modified = metadata
+                        .modified()
+                        .map(|t| DateTime::<Utc>::from(t).timestamp())
+                        .unwrap_or(0);
 
-                let last_modified = fs::metadata(file_path)
-                    .and_then(|m| m.modified())
-                    .map(|t| DateTime::<Utc>::from(t).timestamp())
-                    .unwrap_or(0);
+                    let cleanable = CleanableFile {
+                        path: key.clone(),
+                        size: dir_size,
+                        category: rule.name.clone(),
+                        description: self.get_file_description(file_path, &rule.name),
+                        last_modified,
+                        safe_to_delete: is_safe,
+                        safety_score,
+                        auto_select,
+                    };
 
-                let cleanable = CleanableFile {
-                    path: key.clone(),
-                    size: dir_size,
-                    category: rule.name.clone(),
-                    description: self.get_file_description(file_path, &rule.name),
-                    last_modified,
-                    safe_to_delete: is_safe,
-                    safety_score,
-                    auto_select,
-                };
-
-                self.cleanable_files.push(cleanable);
-                self.seen_paths.insert(path_lower.clone());
-                self.push_seen_dir_prefix(&path_lower);
-
-                continue;
-            }
-
-            // Files
-            if file_type.is_file() {
-                if let Ok(metadata) = fs::metadata(file_path) {
-                    // Extension filter
+                    found_files.push(cleanable);
+                    local_seen_paths.insert(path_lower);
+                } else {
+                    // File processing
                     if let Some(ref allowed_exts) = exts {
                         if let Some(ext) = file_path
                             .extension()
@@ -208,12 +261,11 @@ impl FileCleaner {
                                 continue;
                             }
                         } else {
-                            // No extension – skip when extensions filter is set
                             continue;
                         }
                     }
 
-                    // Age filter (prefer creation time for Downloads/Desktop categories)
+                    // Age filter
                     if let Some(days) = min_age {
                         let relevant_time = (|| {
                             let name_lower = rule.name.to_lowercase();
@@ -229,13 +281,13 @@ impl FileCleaner {
                         })();
 
                         if let Some(file_time) = relevant_time {
-                            if now.signed_duration_since(file_time) < Duration::days(days) {
+                            if now.signed_duration_since(file_time) < ChronoDuration::days(days) {
                                 continue;
                             }
                         }
                     }
 
-                    // Size filter – do NOT hide tiny files unless the rule specifies a minimum
+                    // Size filter
                     let file_size = metadata.len();
                     let min_size = min_size_bytes_from_rule.unwrap_or(0);
                     if file_size < min_size {
@@ -266,13 +318,13 @@ impl FileCleaner {
                         auto_select,
                     };
 
-                    self.cleanable_files.push(cleanable);
-                    self.seen_paths.insert(path_lower);
+                    found_files.push(cleanable);
+                    local_seen_paths.insert(path_lower);
                 }
             }
         }
 
-        Ok(())
+         Ok(())
     }
 
     fn push_seen_dir_prefix(&mut self, path_lower: &str) {
@@ -359,7 +411,7 @@ impl FileCleaner {
     /// Remove selected items.
     /// - We prefer moving to Trash (recoverable) and only fall back to direct removal if needed.
     /// - We allow deletion of items that appeared in the latest scan, even if marked "review".
-    pub fn clean_files(&self, file_paths: Vec<String>) -> Result<(u64, usize), String> {
+    pub async fn clean_files(&self, file_paths: Vec<String>) -> Result<(u64, usize), String> {
         let mut total_freed = 0u64;
         let mut items_removed = 0usize;
         let mut errors = Vec::new();
@@ -401,7 +453,7 @@ impl FileCleaner {
             };
 
             // Prefer moving to Trash for safety; fallback to direct removal if needed
-            match self.move_to_trash(path) {
+            match self.move_to_trash(path).await {
                 Ok(_) => {
                     total_freed += item_size;
                     items_removed += 1;
@@ -447,7 +499,7 @@ impl FileCleaner {
         // On macOS, retry permission-denied items once using a single admin prompt
         #[cfg(target_os = "macos")]
         if !pending_elevated.is_empty() {
-            match Self::remove_with_admin(&pending_elevated.iter().map(|p| p.path.as_str()).collect::<Vec<_>>()) {
+            match Self::remove_with_admin(&pending_elevated.iter().map(|p| p.path.as_str()).collect::<Vec<_>>()).await {
                 Ok(_) => {
                     // Verify and account freed sizes
                     for p in pending_elevated.iter() {
@@ -481,7 +533,7 @@ impl FileCleaner {
     }
 
     #[cfg(target_os = "macos")]
-    fn remove_with_admin(paths: &[&str]) -> Result<(), String> {
+    async fn remove_with_admin(paths: &[&str]) -> Result<(), String> {
         if paths.is_empty() {
             return Ok(());
         }
@@ -515,6 +567,7 @@ impl FileCleaner {
             .arg("-e")
             .arg(script)
             .output()
+            .await
             .map_err(|e| format!("Failed to run osascript: {}", e))?;
 
         if output.status.success() {
@@ -531,7 +584,7 @@ impl FileCleaner {
     /// Move a file or directory to the macOS Trash.
     /// 1) Ask Finder (osascript) — handles per-volume trash & name collisions.
     /// 2) Fallback: rename into ~/.Trash with a unique name.
-    fn move_to_trash(&self, path: &Path) -> Result<(), String> {
+    async fn move_to_trash(&self, path: &Path) -> Result<(), String> {
         // Try Finder first
         let path_str = path.to_string_lossy();
         let escaped = path_str.replace("\\", "\\\\").replace("\"", "\\\"");
@@ -544,6 +597,7 @@ impl FileCleaner {
             .arg("-e")
             .arg(script)
             .output()
+            .await
             .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
 
         if applescript_output.status.success() {
@@ -589,7 +643,7 @@ impl FileCleaner {
     }
 
     /// Empty Trash using Finder (preferred), with safe fallbacks.
-    pub fn empty_trash(&self) -> Result<(u64, usize), String> {
+    pub async fn empty_trash(&self) -> Result<(u64, usize), String> {
         // Get initial trash size and count
         let home =
             dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
@@ -611,6 +665,7 @@ impl FileCleaner {
             .arg("-e")
             .arg(script)
             .output()
+            .await
             .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
 
         if !applescript_output.status.success() {
@@ -632,12 +687,13 @@ impl FileCleaner {
                 let _ = Command::new("sh")
                     .arg("-c")
                     .arg(format!("rm -rf {}", trash_contents))
-                    .output();
+                    .output()
+                    .await;
             }
         }
 
         // Wait a moment for operations to complete
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        sleep(Duration::from_millis(500)).await;
 
         // Calculate freed space
         let size_after = self.get_directory_size(&trash_dir).unwrap_or(0);

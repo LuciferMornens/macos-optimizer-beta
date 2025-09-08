@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::process::Command;
+use tokio::process::Command;
 
 pub(crate) struct AdminScriptOutcome {
     pub success: bool,
@@ -11,7 +11,7 @@ pub(crate) struct AdminScriptOutcome {
     pub cancelled: bool,
 }
 
-pub(crate) fn run_deep_clean() -> AdminScriptOutcome {
+pub(crate) async fn run_deep_clean() -> AdminScriptOutcome {
     let script_path = "/tmp/macos_optimizer_deep_clean.sh";
     let shell_script = r#"#!/bin/bash
 set -euo pipefail
@@ -58,7 +58,7 @@ run RESTART_cfprefsd killall cfprefsd
   do shell script "{}" with administrator privileges
 end timeout"#, script_path);
 
-    let result = Command::new("osascript").arg("-e").arg(applescript).output();
+    let result = Command::new("osascript").arg("-e").arg(applescript).output().await;
 
     // Always attempt cleanup of the temp script
     let _ = fs::remove_file(script_path);

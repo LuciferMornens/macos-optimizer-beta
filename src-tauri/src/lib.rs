@@ -5,162 +5,163 @@ mod memory_optimizer;
 use system_info::{SystemMonitor, SystemInfo, MemoryInfo, ProcessInfo, DiskInfo, CpuInfo};
 use file_cleaner::{FileCleaner, CleanableFile, CleaningReport};
 use memory_optimizer::{MemoryOptimizer, MemoryOptimizationResult, MemoryStats};
-use std::sync::Mutex;
+
 use tauri::{Manager, State};
+use tokio::sync::RwLock;
 
 // Create a state to manage our system monitor
 struct AppState {
-    system_monitor: Mutex<SystemMonitor>,
-    file_cleaner: Mutex<FileCleaner>,
-    memory_optimizer: Mutex<MemoryOptimizer>,
+    system_monitor: RwLock<SystemMonitor>,
+    file_cleaner: RwLock<FileCleaner>,
+    memory_optimizer: RwLock<MemoryOptimizer>,
 }
 
 #[tauri::command]
-fn get_system_info(state: State<AppState>) -> Result<SystemInfo, String> {
-    let mut monitor = state.system_monitor.lock().map_err(|e| e.to_string())?;
+async fn get_system_info(state: State<'_, AppState>) -> Result<SystemInfo, String> {
+    let mut monitor = state.system_monitor.write().await;
     monitor.refresh();
     Ok(monitor.get_system_info())
 }
 
 #[tauri::command]
-fn get_memory_info(state: State<AppState>) -> Result<MemoryInfo, String> {
-    let mut monitor = state.system_monitor.lock().map_err(|e| e.to_string())?;
+async fn get_memory_info(state: State<'_, AppState>) -> Result<MemoryInfo, String> {
+    let mut monitor = state.system_monitor.write().await;
     monitor.refresh();
     Ok(monitor.get_memory_info())
 }
 
 #[tauri::command]
-fn get_cpu_info(state: State<AppState>) -> Result<CpuInfo, String> {
-    let mut monitor = state.system_monitor.lock().map_err(|e| e.to_string())?;
+async fn get_cpu_info(state: State<'_, AppState>) -> Result<CpuInfo, String> {
+    let mut monitor = state.system_monitor.write().await;
     monitor.refresh();
     Ok(monitor.get_cpu_info())
 }
 
 #[tauri::command]
-fn get_processes(state: State<AppState>) -> Result<Vec<ProcessInfo>, String> {
-    let mut monitor = state.system_monitor.lock().map_err(|e| e.to_string())?;
+async fn get_processes(state: State<'_, AppState>) -> Result<Vec<ProcessInfo>, String> {
+    let mut monitor = state.system_monitor.write().await;
     monitor.refresh();
     Ok(monitor.get_processes())
 }
 
 #[tauri::command]
-fn get_top_memory_processes(state: State<AppState>, limit: usize) -> Result<Vec<ProcessInfo>, String> {
-    let mut monitor = state.system_monitor.lock().map_err(|e| e.to_string())?;
+async fn get_top_memory_processes(state: State<'_, AppState>, limit: usize) -> Result<Vec<ProcessInfo>, String> {
+    let mut monitor = state.system_monitor.write().await;
     monitor.refresh();
     Ok(monitor.get_top_memory_processes(limit))
 }
 
 #[tauri::command]
-fn get_disks(state: State<AppState>) -> Result<Vec<DiskInfo>, String> {
-    let mut monitor = state.system_monitor.lock().map_err(|e| e.to_string())?;
+async fn get_disks(state: State<'_, AppState>) -> Result<Vec<DiskInfo>, String> {
+    let mut monitor = state.system_monitor.write().await;
     monitor.refresh();
     Ok(monitor.get_disks())
 }
 
 #[tauri::command]
-fn kill_process(state: State<AppState>, pid: u32) -> Result<(), String> {
-    let mut monitor = state.system_monitor.lock().map_err(|e| e.to_string())?;
+async fn kill_process(state: State<'_, AppState>, pid: u32) -> Result<(), String> {
+    let mut monitor = state.system_monitor.write().await;
     monitor.kill_process(pid)
 }
 
 #[tauri::command]
-fn scan_cleanable_files(state: State<AppState>) -> Result<CleaningReport, String> {
-    let mut cleaner = state.file_cleaner.lock().map_err(|e| e.to_string())?;
-    cleaner.scan_system()
+async fn scan_cleanable_files(state: State<'_, AppState>) -> Result<CleaningReport, String> {
+    let mut cleaner = state.file_cleaner.write().await;
+    cleaner.scan_system().await
 }
 
 #[tauri::command]
-fn get_cleanable_files(state: State<AppState>) -> Result<Vec<CleanableFile>, String> {
-    let cleaner = state.file_cleaner.lock().map_err(|e| e.to_string())?;
+async fn get_cleanable_files(state: State<'_, AppState>) -> Result<Vec<CleanableFile>, String> {
+    let cleaner = state.file_cleaner.read().await;
     Ok(cleaner.get_cleanable_files().clone())
 }
 
 #[tauri::command]
-fn get_auto_selectable_files(state: State<AppState>) -> Result<Vec<CleanableFile>, String> {
-    let cleaner = state.file_cleaner.lock().map_err(|e| e.to_string())?;
+async fn get_auto_selectable_files(state: State<'_, AppState>) -> Result<Vec<CleanableFile>, String> {
+    let cleaner = state.file_cleaner.read().await;
     Ok(cleaner.get_auto_selectable_files())
 }
 
 #[tauri::command]
-fn get_files_by_safety(state: State<AppState>, min_safety_score: u8) -> Result<Vec<CleanableFile>, String> {
-    let cleaner = state.file_cleaner.lock().map_err(|e| e.to_string())?;
+async fn get_files_by_safety(state: State<'_, AppState>, min_safety_score: u8) -> Result<Vec<CleanableFile>, String> {
+    let cleaner = state.file_cleaner.read().await;
     Ok(cleaner.get_files_by_safety(min_safety_score))
 }
 
 #[tauri::command]
-fn clean_files(state: State<AppState>, file_paths: Vec<String>) -> Result<(u64, usize), String> {
-    let cleaner = state.file_cleaner.lock().map_err(|e| e.to_string())?;
-    cleaner.clean_files(file_paths)
+async fn clean_files(state: State<'_, AppState>, file_paths: Vec<String>) -> Result<(u64, usize), String> {
+    let cleaner = state.file_cleaner.read().await;
+    cleaner.clean_files(file_paths).await
 }
 
 #[tauri::command]
-fn empty_trash(state: State<AppState>) -> Result<(u64, usize), String> {
-    let cleaner = state.file_cleaner.lock().map_err(|e| e.to_string())?;
-    cleaner.empty_trash()
+async fn empty_trash(state: State<'_, AppState>) -> Result<(u64, usize), String> {
+    let cleaner = state.file_cleaner.read().await;
+    cleaner.empty_trash().await
 }
 
 #[tauri::command]
-fn optimize_memory(state: State<AppState>) -> Result<MemoryOptimizationResult, String> {
-    let optimizer = state.memory_optimizer.lock().map_err(|e| e.to_string())?;
-    optimizer.optimize_memory()
+async fn optimize_memory(state: State<'_, AppState>) -> Result<MemoryOptimizationResult, String> {
+    let optimizer = state.memory_optimizer.read().await;
+    optimizer.optimize_memory().await
 }
 
 #[tauri::command]
-fn optimize_memory_admin(state: State<AppState>) -> Result<MemoryOptimizationResult, String> {
-    let optimizer = state.memory_optimizer.lock().map_err(|e| e.to_string())?;
+async fn optimize_memory_admin(state: State<'_, AppState>) -> Result<MemoryOptimizationResult, String> {
+    let optimizer = state.memory_optimizer.read().await;
     // Use GUI authentication for admin operations
-    optimizer.optimize_memory_with_admin(true)
+    optimizer.optimize_memory_with_admin(true).await
 }
 
 #[tauri::command]
-fn clear_inactive_memory(state: State<AppState>) -> Result<u64, String> {
-    let optimizer = state.memory_optimizer.lock().map_err(|e| e.to_string())?;
-    optimizer.clear_inactive_memory()
+async fn clear_inactive_memory(state: State<'_, AppState>) -> Result<u64, String> {
+    let optimizer = state.memory_optimizer.read().await;
+    optimizer.clear_inactive_memory().await
 }
 
 #[tauri::command]
-fn get_memory_pressure(state: State<AppState>) -> Result<f32, String> {
-    let optimizer = state.memory_optimizer.lock().map_err(|e| e.to_string())?;
+async fn get_memory_pressure(state: State<'_, AppState>) -> Result<f32, String> {
+    let optimizer = state.memory_optimizer.read().await;
     optimizer.get_memory_pressure()
 }
 
 #[tauri::command]
-fn get_memory_stats(state: State<AppState>) -> Result<MemoryStats, String> {
+async fn get_memory_stats(state: State<'_, AppState>) -> Result<MemoryStats, String> {
     // We don't need the optimizer instance, but lock to keep API consistent
-    drop(state.memory_optimizer.lock().map_err(|e| e.to_string())?);
+    drop(state.memory_optimizer.read().await);
     MemoryOptimizer::get_memory_stats()
 }
 
 #[tauri::command]
-fn get_network_info(state: State<AppState>) -> Result<Vec<system_info::NetworkInfo>, String> {
-    let monitor = state.system_monitor.lock().map_err(|e| e.to_string())?;
+async fn get_network_info(state: State<'_, AppState>) -> Result<Vec<system_info::NetworkInfo>, String> {
+    let monitor = state.system_monitor.read().await;
     Ok(monitor.get_network_info())
 }
 
 #[tauri::command]
-fn get_temperatures(state: State<AppState>) -> Result<Vec<system_info::TemperatureInfo>, String> {
-    let monitor = state.system_monitor.lock().map_err(|e| e.to_string())?;
+async fn get_temperatures(state: State<'_, AppState>) -> Result<Vec<system_info::TemperatureInfo>, String> {
+    let monitor = state.system_monitor.read().await;
     Ok(monitor.get_temperatures())
 }
 
 #[tauri::command]
-fn kill_memory_intensive_processes(state: State<AppState>, threshold_mb: u64) -> Result<Vec<String>, String> {
-    let optimizer = state.memory_optimizer.lock().map_err(|e| e.to_string())?;
-    optimizer.kill_memory_intensive_processes(threshold_mb)
+async fn kill_memory_intensive_processes(state: State<'_, AppState>, threshold_mb: u64) -> Result<Vec<String>, String> {
+    let optimizer = state.memory_optimizer.read().await;
+    optimizer.kill_memory_intensive_processes(threshold_mb).await
 }
 
 #[tauri::command]
-fn optimize_swap(state: State<AppState>) -> Result<String, String> {
-    let optimizer = state.memory_optimizer.lock().map_err(|e| e.to_string())?;
-    optimizer.optimize_swap()
+async fn optimize_swap(state: State<'_, AppState>) -> Result<String, String> {
+    let optimizer = state.memory_optimizer.read().await;
+    optimizer.optimize_swap().await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app_state = AppState {
-        system_monitor: Mutex::new(SystemMonitor::new()),
-        file_cleaner: Mutex::new(FileCleaner::new()),
-        memory_optimizer: Mutex::new(MemoryOptimizer::new()),
+        system_monitor: RwLock::new(SystemMonitor::new()),
+        file_cleaner: RwLock::new(FileCleaner::new()),
+        memory_optimizer: RwLock::new(MemoryOptimizer::new()),
     };
 
     tauri::Builder::default()

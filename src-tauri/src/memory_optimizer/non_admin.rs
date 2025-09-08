@@ -1,42 +1,35 @@
 // src/memory_optimizer/non_admin.rs
 
-use libc;
-use std::process::Command;
-use std::thread;
-use std::time::Duration;
+
+
+use tokio::time::{sleep, Duration};
+use tokio::process::Command as TokioCommand;
 
 use super::stats;
 
-pub(crate) fn clear_inactive_memory_safe() -> Result<u64, String> {
+pub(crate) async fn clear_inactive_memory_safe() -> Result<u64, String> {
     let before = stats::get_memory_stats()?;
 
     // Force sync to write dirty pages
-    Command::new("sync")
+    TokioCommand::new("sync")
         .output()
+        .await
         .map_err(|e| format!("Failed to sync: {}", e))?;
 
-    // Allocate and free memory to trigger compaction
-    unsafe {
-        // Allocate multiple smaller chunks to avoid issues
-        let chunks = 10;
-        let chunk_size = 50 * 1024 * 1024; // 50MB chunks
-        let mut ptrs = Vec::new();
+    // Allocate and free memory to trigger compaction using safe Vec
+    let chunks = 10;
+    let chunk_size = 50 * 1024 * 1024; // 50MB chunks
+    let mut memory_chunks = Vec::new();
 
-        for _ in 0..chunks {
-            let ptr = libc::malloc(chunk_size);
-            if !ptr.is_null() {
-                libc::memset(ptr, 0, chunk_size);
-                ptrs.push(ptr);
-            }
-        }
-
-        // Free all at once to trigger compaction
-        for ptr in ptrs {
-            libc::free(ptr);
-        }
+    for _ in 0..chunks {
+        let chunk: Vec<u8> = vec![0; chunk_size];
+        memory_chunks.push(chunk);
     }
 
-    thread::sleep(Duration::from_millis(500));
+    // Free all chunks
+    drop(memory_chunks);
+
+    sleep(Duration::from_millis(500)).await;
 
     let after = stats::get_memory_stats()?;
     Ok(if after.available > before.available {
@@ -46,43 +39,48 @@ pub(crate) fn clear_inactive_memory_safe() -> Result<u64, String> {
     })
 }
 
-pub(crate) fn optimize_file_caches() -> Result<(), String> {
+pub(crate) async fn optimize_file_caches() -> Result<(), String> {
     // Drop file system caches that can be rebuilt
-    Command::new("sync")
+    TokioCommand::new("sync")
         .output()
+        .await
         .map_err(|e| format!("Failed to sync: {}", e))?;
 
     // Force file system to drop clean caches
-    Command::new("sync")
+    TokioCommand::new("sync")
         .output()
+        .await
         .map_err(|e| format!("Failed to sync: {}", e))?;
 
     Ok(())
 }
 
-pub(crate) fn clear_app_caches() -> Result<usize, String> {
+pub(crate) async fn clear_app_caches() -> Result<usize, String> {
     let mut cleared = 0;
 
     // Clear Safari cache
-    if let Ok(_) = Command::new("rm")
+    if let Ok(_) = TokioCommand::new("rm")
         .args(&["-rf", "~/Library/Caches/com.apple.Safari/Cache.db"])
         .output()
+        .await
     {
         cleared += 1;
     }
 
     // Clear Chrome memory cache
-    if let Ok(_) = Command::new("rm")
+    if let Ok(_) = TokioCommand::new("rm")
         .args(&["-rf", "~/Library/Caches/Google/Chrome/Default/Cache"])
         .output()
+        .await
     {
         cleared += 1;
     }
 
     // Clear system app caches
-    if let Ok(_) = Command::new("rm")
+    if let Ok(_) = TokioCommand::new("rm")
         .args(&["-rf", "~/Library/Caches/com.apple.dt.Xcode/Cache"])
         .output()
+        .await
     {
         cleared += 1;
     }
@@ -90,55 +88,55 @@ pub(crate) fn clear_app_caches() -> Result<usize, String> {
     Ok(cleared)
 }
 
-pub(crate) fn optimize_memory_compression() -> Result<(), String> {
-    // Trigger memory compression by creating memory pressure
-    unsafe {
-        // Allocate memory to trigger compression
-        let size = 100 * 1024 * 1024; // 100MB
-        let ptr = libc::malloc(size);
-        if !ptr.is_null() {
-            // Write random data to prevent deduplication
-            for i in 0..size/8 {
-                let random_ptr = ptr.add(i * 8) as *mut u64;
-                *random_ptr = i as u64;
-            }
-
-            // Sleep to let compression happen
-            thread::sleep(Duration::from_millis(100));
-
-            // Free the memory
-            libc::free(ptr);
-        }
+pub(crate) async fn optimize_memory_compression() -> Result<(), String> {
+    // Trigger memory compression by creating memory pressure with smaller, safer allocations
+    // Use Vec to avoid raw pointer Send issues
+    let size = 20 * 1024 * 1024 / 8; // 20MB worth of u64s
+    let mut memory_chunk: Vec<u64> = Vec::with_capacity(size);
+    
+    // Write data to trigger memory pressure
+    for i in 0..size {
+        memory_chunk.push(i as u64);
     }
+    
+    // Sleep to let compression happen
+    sleep(Duration::from_millis(100)).await;
+    
+    // Vec will be automatically freed when it goes out of scope
+    drop(memory_chunk);
+    
     Ok(())
 }
 
-pub(crate) fn clear_network_caches_safe() -> Result<(), String> {
+pub(crate) async fn clear_network_caches_safe() -> Result<(), String> {
     // Clear network preferences cache
-    Command::new("rm")
+    TokioCommand::new("rm")
         .args(&["-rf", "~/Library/Caches/com.apple.networkserviceproxy"])
         .output()
+        .await
         .ok();
 
     // Clear CFNetwork cache
-    Command::new("rm")
+    TokioCommand::new("rm")
         .args(&["-rf", "~/Library/Caches/com.apple.cfnetwork"])
         .output()
+        .await
         .ok();
 
     Ok(())
 }
 
-pub(crate) fn trigger_app_gc() -> Result<usize, String> {
+pub(crate) async fn trigger_app_gc() -> Result<usize, String> {
     let mut triggered = 0;
 
     // Send memory pressure signals to apps
     let apps = ["Safari", "Chrome", "Firefox", "Mail", "Xcode"];
 
     for app in &apps {
-        if let Ok(_) = Command::new("killall")
+        if let Ok(_) = TokioCommand::new("killall")
             .args(&["-CONT", app])
             .output()
+            .await
         {
             triggered += 1;
         }
@@ -147,24 +145,21 @@ pub(crate) fn trigger_app_gc() -> Result<usize, String> {
     Ok(triggered)
 }
 
-pub(crate) fn clear_temp_allocations() -> Result<(), String> {
-    // Clear temporary allocations by forcing malloc to release free pages
-    unsafe {
-        // Multiple malloc/free cycles to fragment and reclaim memory
-        for _ in 0..5 {
-            let size = 20 * 1024 * 1024; // 20MB
-            let ptr = libc::malloc(size);
-            if !ptr.is_null() {
-                libc::memset(ptr, 0, size);
-                libc::free(ptr);
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
+pub(crate) async fn clear_temp_allocations() -> Result<(), String> {
+    // Clear temporary allocations by creating and releasing memory chunks
+    for _ in 0..5 {
+        let size = 10 * 1024 * 1024; // 10MB
+        let memory_chunk: Vec<u8> = vec![0; size];
+        
+        sleep(Duration::from_millis(50)).await;
+        
+        // Vec will be automatically freed
+        drop(memory_chunk);
     }
     Ok(())
 }
 
-pub(crate) fn optimize_swap() -> Result<String, String> {
+pub(crate) async fn optimize_swap() -> Result<String, String> {
     // Check current swap usage
     let stats = stats::get_memory_stats()?;
 
@@ -173,19 +168,20 @@ pub(crate) fn optimize_swap() -> Result<String, String> {
     }
 
     // Try to reduce swap usage by freeing memory
-    let _ = clear_inactive_memory_safe()?;
+    let _ = clear_inactive_memory_safe().await?;
 
     Ok(format!("Swap optimization attempted. Current swap usage: {} MB",
                stats.swap_used / (1024 * 1024)))
 }
 
-pub(crate) fn kill_memory_intensive_processes(threshold_mb: u64) -> Result<Vec<String>, String> {
+pub(crate) async fn kill_memory_intensive_processes(threshold_mb: u64) -> Result<Vec<String>, String> {
     let mut killed_processes = Vec::new();
 
     // Get list of processes using more than threshold memory
-    let output = Command::new("ps")
+    let output = TokioCommand::new("ps")
         .args(&["aux"])
         .output()
+        .await
         .map_err(|e| format!("Failed to list processes: {}", e))?;
 
     let output_str = String::from_utf8_lossy(&output.stdout);
@@ -203,10 +199,11 @@ pub(crate) fn kill_memory_intensive_processes(threshold_mb: u64) -> Result<Vec<S
                     // Skip critical system processes
                     if !is_critical_process(process_name) {
                         // Try to kill the process
-                        if let Ok(_) = Command::new("kill")
+                        if let Ok(_) = TokioCommand::new("kill")
                             .arg("-TERM")
                             .arg(pid)
                             .output()
+                            .await
                         {
                             killed_processes.push(format!("{} (PID: {})", process_name, pid));
                         }
