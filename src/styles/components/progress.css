@@ -1,0 +1,543 @@
+/* ========================================
+   Progress Components & Loading States
+   ======================================== */
+
+/* Global Progress Container */
+.global-progress-container {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    width: 320px;
+    max-height: 400px;
+    overflow-y: auto;
+    z-index: 1000;
+    pointer-events: none;
+}
+
+.global-progress-container .operation-progress {
+    pointer-events: auto;
+    margin-bottom: 12px;
+}
+
+/* Operation Progress Bars */
+.operation-progress {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: var(--shadow-lg);
+    animation: slideInRight 0.3s ease-out;
+}
+
+.operation-progress.fade-out {
+    animation: fadeOut 0.3s ease-out;
+    opacity: 0;
+}
+
+.progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.progress-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.progress-cancel {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all var(--transition-fast);
+}
+
+.progress-cancel:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.progress-bar-container {
+    position: relative;
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    height: 8px;
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #007AFF, #5AC8FA);
+    border-radius: 6px;
+    transition: width 0.5s ease-out;
+    position: relative;
+    min-width: 2px;
+}
+
+.progress-bar-fill.near-complete {
+    background: linear-gradient(90deg, #FF9500, #FFCC02);
+}
+
+.progress-bar-fill.complete {
+    background: linear-gradient(90deg, #34C759, #30D158);
+}
+
+.progress-bar-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+    animation: shimmer 2s infinite;
+}
+
+.progress-percentage {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.progress-message {
+    font-size: 13px;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+
+.progress-stage {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+/* Activity Indicator */
+.activity-indicator {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px 16px;
+    box-shadow: var(--shadow-lg);
+    display: none;
+    align-items: center;
+    gap: 12px;
+    z-index: 1000;
+    max-width: 300px;
+}
+
+.activity-indicator.show {
+    display: flex;
+    animation: slideInRight var(--transition-base);
+}
+
+.activity-dot {
+    width: 8px;
+    height: 8px;
+    background: #34C759;
+    border-radius: 50%;
+    animation: pulseSoft 1.5s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+.activity-text {
+    font-size: 13px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Skeleton Loaders */
+.skeleton-loader {
+    padding: 20px;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.skeleton-stat-card {
+    background: var(--bg-card);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+    border: 1px solid var(--border-color);
+}
+
+.skeleton-line {
+    background: linear-gradient(90deg, 
+        var(--bg-secondary) 25%, 
+        var(--bg-tertiary) 50%, 
+        var(--bg-secondary) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton 1.5s ease-in-out infinite;
+    border-radius: 4px;
+    margin-bottom: 12px;
+}
+
+.skeleton-title {
+    height: 16px;
+    width: 60%;
+}
+
+.skeleton-value {
+    height: 32px;
+    width: 40%;
+    margin: 12px 0;
+}
+
+.skeleton-detail {
+    height: 14px;
+    width: 80%;
+}
+
+.skeleton-progress {
+    height: 6px;
+    width: 100%;
+    background: linear-gradient(90deg, 
+        #007AFF 0%, 
+        #007AFF 30%, 
+        var(--bg-secondary) 30%
+    );
+    background-size: 200% 100%;
+    animation: skeleton 1.5s ease-in-out infinite;
+    border-radius: 3px;
+    margin-top: 12px;
+}
+
+/* Loading Overlay */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(10px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.loading-overlay.show {
+    display: flex;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.loading-spinner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.spinner {
+    animation: rotate 2s linear infinite;
+    width: 50px;
+    height: 50px;
+}
+
+.spinner .path {
+    stroke: #007AFF;
+    stroke-linecap: round;
+    animation: dash 1.5s ease-in-out infinite;
+}
+
+.loading-text {
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 500;
+    text-align: center;
+}
+
+/* Operation History */
+.operation-history {
+    position: fixed;
+    top: 80px;
+    right: -320px;
+    width: 300px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: var(--shadow-xl);
+    transition: right var(--transition-base);
+    max-height: 400px;
+    overflow-y: auto;
+    z-index: 999;
+}
+
+.operation-history.show {
+    right: 20px;
+}
+
+.operation-history h4 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+}
+
+.history-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.history-item {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 12px;
+    position: relative;
+    padding-left: 12px;
+}
+
+.history-item:last-child {
+    border-bottom: none;
+}
+
+.history-item.success::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 4px;
+    background: #34C759;
+    border-radius: 50%;
+}
+
+.history-item.error::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 4px;
+    background: #FF3B30;
+    border-radius: 50%;
+}
+
+.history-operation {
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+}
+
+.history-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    color: var(--text-secondary);
+}
+
+.history-time {
+    font-size: 11px;
+}
+
+.history-duration {
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+
+.history-wait {
+    font-size: 11px;
+    color: #FF9500;
+}
+
+.history-error {
+    font-size: 11px;
+    color: #FF3B30;
+    margin-top: 4px;
+    font-style: italic;
+}
+
+/* Button Loading States */
+.btn.loading {
+    position: relative;
+    color: transparent !important;
+    pointer-events: none;
+}
+
+.btn.loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top: 2px solid currentColor;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.btn.loading.btn-secondary::after {
+    border-color: rgba(0,0,0,0.3);
+    border-top-color: currentColor;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .global-progress-container {
+        right: 10px;
+        left: 10px;
+        width: auto;
+    }
+    
+    .activity-indicator {
+        right: 10px;
+        left: 10px;
+        max-width: none;
+    }
+    
+    .operation-history {
+        right: -100%;
+        left: 10px;
+        width: auto;
+    }
+    
+    .operation-history.show {
+        right: 0;
+    }
+}
+
+/* Animations */
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideInUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+@keyframes skeleton {
+    0% {
+        background-position: -200px 0;
+    }
+    100% {
+        background-position: calc(200px + 100%) 0;
+    }
+}
+
+@keyframes rotate {
+    100% { 
+        transform: rotate(360deg); 
+    }
+}
+
+@keyframes dash {
+    0% {
+        stroke-dasharray: 1, 150;
+        stroke-dashoffset: 0;
+    }
+    50% {
+        stroke-dasharray: 90, 150;
+        stroke-dashoffset: -35;
+    }
+    100% {
+        stroke-dasharray: 90, 150;
+        stroke-dashoffset: -124;
+    }
+}
+
+@keyframes shimmer {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .progress-bar-fill {
+        background: #007AFF;
+    }
+    
+    .skeleton-line {
+        background: repeating-linear-gradient(
+            90deg,
+            var(--bg-secondary) 0px,
+            var(--bg-tertiary) 20px,
+            var(--bg-secondary) 40px
+        );
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    .operation-progress,
+    .activity-indicator,
+    .loading-overlay {
+        animation: none;
+    }
+    
+    .progress-bar-fill {
+        transition: none;
+    }
+    
+    .skeleton-line,
+    .skeleton-progress {
+        animation: none;
+        background: var(--bg-tertiary);
+    }
+    
+    .spinner {
+        animation: none;
+    }
+    
+    .progress-bar-fill::after {
+        animation: none;
+    }
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .loading-text {
+        color: #ffffff;
+    }
+    
+    .skeleton-line {
+        background: linear-gradient(90deg, 
+            rgba(255,255,255,0.05) 25%, 
+            rgba(255,255,255,0.1) 50%, 
+            rgba(255,255,255,0.05) 75%
+        );
+    }
+}

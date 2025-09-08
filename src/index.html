@@ -156,6 +156,9 @@
                     </div>
                 </div>
 
+                <!-- Memory progress container -->
+                <div id="memory-progress-container" style="display: none; margin-bottom: 20px;"></div>
+
                 <div class="memory-overview">
                     <div class="memory-chart">
                         <canvas id="memory-chart"></canvas>
@@ -341,6 +344,53 @@
         </main>
     </div>
 
+    <!-- Skeleton loader for dashboard stats -->
+    <div class="skeleton-loader" id="dashboard-skeleton" style="display: none;">
+        <div class="skeleton-stat-card">
+            <div class="skeleton-line skeleton-title"></div>
+            <div class="skeleton-line skeleton-value"></div>
+            <div class="skeleton-line skeleton-detail"></div>
+            <div class="skeleton-progress"></div>
+        </div>
+        <div class="skeleton-stat-card">
+            <div class="skeleton-line skeleton-title"></div>
+            <div class="skeleton-line skeleton-value"></div>
+            <div class="skeleton-line skeleton-detail"></div>
+            <div class="skeleton-progress"></div>
+        </div>
+        <div class="skeleton-stat-card">
+            <div class="skeleton-line skeleton-title"></div>
+            <div class="skeleton-line skeleton-value"></div>
+            <div class="skeleton-line skeleton-detail"></div>
+            <div class="skeleton-progress"></div>
+        </div>
+    </div>
+
+    <!-- Loading overlay for operations -->
+    <div class="loading-overlay" id="global-loading">
+        <div class="loading-spinner">
+            <svg class="spinner" viewBox="0 0 50 50">
+                <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
+            </svg>
+        </div>
+        <div class="loading-text">Processing...</div>
+    </div>
+
+    <!-- Global activity indicator -->
+    <div class="activity-indicator" id="activity-indicator">
+        <div class="activity-dot"></div>
+        <span class="activity-text">Background operation in progress</span>
+    </div>
+
+    <!-- Operation history panel -->
+    <div class="operation-history" id="operation-history">
+        <h4>Recent Operations</h4>
+        <div id="operation-history-list">
+            <!-- Dynamically populated -->
+        </div>
+        <button class="btn btn-link" id="toggle-history" style="margin-top: 8px; font-size: 12px;">Hide History</button>
+    </div>
+
     <div class="notification" id="notification">
         <div class="notification-content">
             <span class="notification-message"></span>
@@ -348,6 +398,9 @@
         </div>
     </div>
 
+    <!-- Import JavaScript modules -->
+    <script src="js/progress-manager.js"></script>
+    <script src="js/operation-queue.js"></script>
     <script src="main.js" type="module"></script>
 </body>
 </html>

@@ -325,15 +325,7 @@ impl FileCleaner {
         }
 
          Ok(())
-    }
-
-    fn push_seen_dir_prefix(&mut self, path_lower: &str) {
-        let mut prefix = path_lower.to_string();
-        if !prefix.ends_with('/') {
-            prefix.push('/');
-        }
-        self.seen_dir_prefixes.push(prefix);
-    }
+     }
 
     fn get_file_description(&self, path: &Path, category: &str) -> String {
         let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("Unknown");

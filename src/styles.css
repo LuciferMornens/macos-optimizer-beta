@@ -19,6 +19,7 @@
 @import url('styles/components/badges.css');
 @import url('styles/components/notifications.css');
 @import url('styles/components/modals.css');
+@import url('styles/components/progress.css');
 
 /* Pages */
 @import url('styles/pages/dashboard.css');

@@ -170,35 +170,88 @@ function setupTabNavigation() {
     });
 }
 
-// Dashboard functions
+// Skeleton loader functions
+function showDashboardSkeleton() {
+    const skeleton = document.getElementById('dashboard-skeleton');
+    const statsGrid = document.querySelector('#dashboard .stats-grid');
+    if (skeleton && statsGrid) {
+        skeleton.style.display = 'block';
+        statsGrid.style.opacity = '0.3';
+    }
+}
+
+function hideDashboardSkeleton() {
+    const skeleton = document.getElementById('dashboard-skeleton');
+    const statsGrid = document.querySelector('#dashboard .stats-grid');
+    if (skeleton && statsGrid) {
+        skeleton.style.display = 'none';
+        statsGrid.style.opacity = '1';
+    }
+}
+
+function showGlobalLoading(message = 'Processing...') {
+    const overlay = document.getElementById('global-loading');
+    const text = overlay?.querySelector('.loading-text');
+    if (overlay) {
+        if (text) text.textContent = message;
+        overlay.classList.add('show');
+    }
+}
+
+function hideGlobalLoading() {
+    const overlay = document.getElementById('global-loading');
+    if (overlay) {
+        overlay.classList.remove('show');
+    }
+}
+
+// Dashboard functions  
 async function loadDashboard() {
     console.log('Loading dashboard...');
+    
+    // Show skeleton for perceived performance
+    showDashboardSkeleton();
+    
     try {
-        // Load system info
-        const systemInfo = await invoke('get_system_info');
-        console.log('System info:', systemInfo);
-        const memStats = await invoke('get_memory_stats');
-        console.log('Memory stats:', memStats);
-        const cpuInfo = await invoke('get_cpu_info');
-        console.log('CPU info:', cpuInfo);
-        const disks = await invoke('get_disks');
-        console.log('Disks:', disks);
+        // Load critical data first (memory stats)
+        const criticalData = await Promise.race([
+            invoke('get_memory_stats'),
+            new Promise(resolve => setTimeout(() => resolve(null), 2000))
+        ]);
         
-        // Update memory stats (unified source)
-        const memoryPercent = (memStats.used / memStats.total * 100).toFixed(1);
-        document.getElementById('memory-usage').textContent = `${memoryPercent}%`;
-        document.getElementById('memory-detail').textContent = 
-            `${formatBytes(memStats.used)} / ${formatBytes(memStats.total)}`;
-        document.getElementById('memory-progress').style.width = `${memoryPercent}%`;
+        if (criticalData) {
+            console.log('Memory stats (priority):', criticalData);
+            // Update memory stats immediately
+            const memoryPercent = (criticalData.used / criticalData.total * 100).toFixed(1);
+            document.getElementById('memory-usage').textContent = `${memoryPercent}%`;
+            document.getElementById('memory-detail').textContent = 
+                `${formatBytes(criticalData.used)} / ${formatBytes(criticalData.total)}`;
+            document.getElementById('memory-progress').style.width = `${memoryPercent}%`;
+        }
         
-        // Update CPU stats
-        document.getElementById('cpu-usage').textContent = `${cpuInfo.cpu_usage.toFixed(1)}%`;
-        document.getElementById('cpu-detail').textContent = `${cpuInfo.core_count} cores`;
-        document.getElementById('cpu-progress').style.width = `${cpuInfo.cpu_usage}%`;
+        // Load remaining data in parallel
+        const [systemInfo, cpuInfo, disks] = await Promise.allSettled([
+            invoke('get_system_info'),
+            invoke('get_cpu_info'),
+            invoke('get_disks')
+        ]);
         
-        // Update disk stats (use first disk)
-        if (disks.length > 0) {
-            const mainDisk = disks[0];
+        console.log('System data loaded:', { systemInfo: systemInfo.status, cpuInfo: cpuInfo.status, disks: disks.status });
+        
+        // Update CPU stats if available
+        if (cpuInfo.status === 'fulfilled') {
+            const cpu = cpuInfo.value;
+            console.log('CPU info:', cpu);
+            document.getElementById('cpu-usage').textContent = `${cpu.cpu_usage.toFixed(1)}%`;
+            document.getElementById('cpu-detail').textContent = `${cpu.core_count} cores`;
+            document.getElementById('cpu-progress').style.width = `${cpu.cpu_usage}%`;
+        }
+        
+        // Update disk stats if available (use first disk)
+        if (disks.status === 'fulfilled' && disks.value.length > 0) {
+            const diskData = disks.value;
+            console.log('Disks:', diskData);
+            const mainDisk = diskData[0];
             const diskPercent = (mainDisk.used_space / mainDisk.total_space * 100).toFixed(1);
             document.getElementById('disk-usage').textContent = `${diskPercent}%`;
             document.getElementById('disk-detail').textContent = 
@@ -206,17 +259,26 @@ async function loadDashboard() {
             document.getElementById('disk-progress').style.width = `${diskPercent}%`;
         }
         
-        // Update system info
-        document.getElementById('uptime').textContent = formatUptime(systemInfo.uptime);
-        document.getElementById('system-info').textContent = systemInfo.os_name;
-        document.getElementById('os-version').textContent = systemInfo.os_version;
-        document.getElementById('hostname').textContent = systemInfo.hostname;
-        document.getElementById('boot-time').textContent = 
-            new Date(systemInfo.boot_time * 1000).toLocaleString();
+        // Update system info if available
+        if (systemInfo.status === 'fulfilled') {
+            const sysInfo = systemInfo.value;
+            console.log('System info:', sysInfo);
+            document.getElementById('uptime').textContent = formatUptime(sysInfo.uptime);
+            document.getElementById('system-info').textContent = sysInfo.os_name;
+            document.getElementById('os-version').textContent = sysInfo.os_version;
+            document.getElementById('hostname').textContent = sysInfo.hostname;
+            document.getElementById('boot-time').textContent = 
+                new Date(sysInfo.boot_time * 1000).toLocaleString();
+        }
         
     } catch (error) {
         console.error('Error loading dashboard:', error);
         showNotification('Failed to load dashboard data', 'error');
+    } finally {
+        // Hide skeleton after loading
+        setTimeout(() => {
+            hideDashboardSkeleton();
+        }, 300);
     }
 }
 
@@ -288,36 +350,49 @@ async function scanForCleanableFiles() {
     const cleaningReport = document.getElementById('cleaning-report');
     const cleanButton = document.getElementById('clean-selected');
     
-    scanProgress.style.display = 'block';
-    cleaningReport.style.display = 'none';
-    cleanButton.disabled = true;
-    
-    try {
-        const report = await invoke('scan_cleanable_files');
-        lastReport = report;
-        cleanableFiles = await invoke('get_cleanable_files');
-        
-        // Update summary
-        document.getElementById('total-cleanable').textContent = formatBytes(report.total_size);
-        document.getElementById('files-found').textContent = report.files_count;
-        
-        // Display categories
-        renderCategories();
-        
-        // Display files
-        currentCategoryFilter = null;
-        displayFiles(cleanableFiles);
-        
-        scanProgress.style.display = 'none';
-        cleaningReport.style.display = 'block';
-        cleanButton.disabled = false;
-        
-        showNotification(`Found ${report.files_count} cleanable files (${formatBytes(report.total_size)})`, 'success');
-    } catch (error) {
-        console.error('Error scanning files:', error);
-        showNotification('Failed to scan for cleanable files', 'error');
-        scanProgress.style.display = 'none';
-    }
+    return operationQueue.add(
+        async () => {
+            scanProgress.style.display = 'block';
+            cleaningReport.style.display = 'none';
+            cleanButton.disabled = true;
+            
+            try {
+                const report = await invoke('scan_cleanable_files');
+                lastReport = report;
+                cleanableFiles = await invoke('get_cleanable_files');
+                
+                // Update summary
+                document.getElementById('total-cleanable').textContent = formatBytes(report.total_size);
+                document.getElementById('files-found').textContent = report.files_count;
+                
+                // Display categories
+                renderCategories();
+                
+                // Display files
+                currentCategoryFilter = null;
+                displayFiles(cleanableFiles);
+                
+                scanProgress.style.display = 'none';
+                cleaningReport.style.display = 'block';
+                cleanButton.disabled = false;
+                
+                showNotification(`Found ${report.files_count} cleanable files (${formatBytes(report.total_size)})`, 'success');
+                return report;
+            } catch (error) {
+                console.error('Error scanning files:', error);
+                showNotification('Failed to scan for cleanable files', 'error');
+                scanProgress.style.display = 'none';
+                throw error;
+            }
+        },
+        { 
+            debounce: 1000, 
+            id: 'scan-files', 
+            priority: 1,
+            description: 'File System Scan',
+            timeout: 30000
+        }
+    );
 }
 
 function renderCategories() {
@@ -762,65 +837,80 @@ function setupEventListeners() {
             e.stopPropagation(); // Prevent the delegated handler from also firing
             console.log('Deep clean direct listener triggered!');
             
-            // Skip confirmation dialog for now - it's not working properly in WebView
-            console.log('Deep clean requested, proceeding...');
+            // Check if button is already disabled/loading
+            if (deepCleanBtn.disabled || deepCleanBtn.classList.contains('loading')) {
+                return;
+            }
             
-            // You can uncomment this to re-enable confirmation later
-            // const confirmed = confirm(
-            //     '⚠️ Deep Clean with Administrator Access\n\n' +
-            //     'This will:\n' +
-            //     '• Purge all disk caches\n' +
-            //     '• Clear DNS and network caches\n' +
-            //     '• Optimize memory compression\n' +
-            //     '• Free inactive memory\n' +
-            //     '• Clear application caches\n\n' +
-            //     'You will be prompted for your administrator password.\n' +
-            //     'Continue?'
-            // );
-            // 
-            // if (!confirmed) {
-            //     console.log('User cancelled deep clean');
-            //     return;
-            // }
+            const confirmed = await userConfirm(
+                '⚠️ Deep Clean with Administrator Access\n\n' +
+                'This will:\n' +
+                '• Purge all disk caches\n' +
+                '• Clear DNS and network caches\n' +
+                '• Optimize memory compression\n' +
+                '• Free inactive memory\n' +
+                '• Clear application caches\n\n' +
+                'You will be prompted for your administrator password.\n' +
+                'Continue?',
+                { title: 'Deep Clean (Admin)', kind: 'warning' }
+            );
             
-            console.log('Starting deep clean with admin access...');
+            if (!confirmed) {
+                console.log('User cancelled deep clean');
+                return;
+            }
             
             try {
-                showNotification('Starting deep clean with admin access...', 'success');
-                console.log('Invoking optimize_memory_admin...');
-                const result = await invoke('optimize_memory_admin');
-                console.log('Deep clean result received:', result);
+                deepCleanBtn.disabled = true;
+                deepCleanBtn.classList.add('loading');
                 
-                const resultDiv = document.getElementById('optimization-result');
-                const resultContent = resultDiv.querySelector('.result-content');
-                
-                let optimizationsList = '';
-                if (result.optimizations_performed && result.optimizations_performed.length > 0) {
-                    optimizationsList = '<ul style="color: #34C759;">' +
-                        result.optimizations_performed.map(opt => `<li>✓ ${opt}</li>`).join('') +
-                        '</ul>';
-                }
-                
-                resultContent.innerHTML = `
-                    <h4 style="color: #34C759;">✨ Deep Clean Complete!</h4>
-                    <p><strong>Memory Freed:</strong> <span style="color: #34C759; font-size: 24px;">${formatBytes(result.freed_memory)}</span></p>
-                    <p><strong>Memory Usage:</strong> ${formatBytes(result.memory_after.used)} / ${formatBytes(result.memory_after.total)}</p>
-                    <p><strong>Available Now:</strong> ${formatBytes(result.memory_after.available)}</p>
-                    <div style="margin-top: 15px;">
-                        <strong>Optimizations Performed:</strong>
-                        ${optimizationsList}
-                    </div>
-                `;
-                
-                resultDiv.style.display = 'block';
-                resultDiv.style.border = '2px solid #34C759';
-                
-                showNotification(`Deep clean complete! Freed ${formatBytes(result.freed_memory)} of memory`, 'success');
-                
-                await loadMemoryInfo();
+                await operationQueue.add(
+                    async () => {
+                        console.log('Invoking optimize_memory_admin...');
+                        const result = await invoke('optimize_memory_admin');
+                        console.log('Deep clean result received:', result);
+                        
+                        const resultDiv = document.getElementById('optimization-result');
+                        const resultContent = resultDiv.querySelector('.result-content');
+                        
+                        let optimizationsList = '';
+                        if (result.optimizations_performed && result.optimizations_performed.length > 0) {
+                            optimizationsList = '<ul style="color: #34C759;">' +
+                                result.optimizations_performed.map(opt => `<li>✓ ${opt}</li>`).join('') +
+                                '</ul>';
+                        }
+                        
+                        resultContent.innerHTML = `
+                            <h4 style="color: #34C759;">✨ Deep Clean Complete!</h4>
+                            <p><strong>Memory Freed:</strong> <span style="color: #34C759; font-size: 24px;">${formatBytes(result.freed_memory)}</span></p>
+                            <p><strong>Memory Usage:</strong> ${formatBytes(result.memory_after.used)} / ${formatBytes(result.memory_after.total)}</p>
+                            <p><strong>Available Now:</strong> ${formatBytes(result.memory_after.available)}</p>
+                            <div style="margin-top: 15px;">
+                                <strong>Optimizations Performed:</strong>
+                                ${optimizationsList}
+                            </div>
+                        `;
+                        
+                        resultDiv.style.display = 'block';
+                        resultDiv.style.border = '2px solid #34C759';
+                        
+                        await loadMemoryInfo();
+                        return result;
+                    },
+                    { 
+                        debounce: 500, 
+                        id: 'deep-clean-memory', 
+                        priority: 3,
+                        description: 'Deep Memory Clean (Admin)',
+                        timeout: 20000
+                    }
+                );
             } catch (error) {
                 console.error('Deep clean error:', error);
                 showNotification('Deep clean failed: ' + error, 'error');
+            } finally {
+                deepCleanBtn.disabled = false;
+                deepCleanBtn.classList.remove('loading');
             }
         });
     }
@@ -980,6 +1070,11 @@ window.addEventListener('DOMContentLoaded', () => {
             event.preventDefault();
             event.stopPropagation();
             
+            // Check if button is already disabled/loading
+            if (button.disabled || button.classList.contains('loading')) {
+                return;
+            }
+            
             const useAdmin = confirm(
                 'Memory Optimization Options:\n\n' +
                 'OK = Deep Optimization (requires admin password)\n' +
@@ -987,46 +1082,58 @@ window.addEventListener('DOMContentLoaded', () => {
                 'Deep optimization can free more memory but requires administrator access.'
             );
             
+            // Add to operation queue with debouncing
             try {
-                showNotification('Starting memory optimization...', 'success');
+                button.disabled = true;
+                button.classList.add('loading');
                 
-                const result = useAdmin
-                    ? await invoke('optimize_memory_admin')
-                    : await invoke('optimize_memory');
-                
-                console.log('Optimization result:', result);
-                
-                const resultDiv = document.getElementById('optimization-result');
-                const resultContent = resultDiv.querySelector('.result-content');
-                
-                let optimizationsList = '';
-                if (result.optimizations_performed && result.optimizations_performed.length > 0) {
-                    optimizationsList = '<ul>' +
-                        result.optimizations_performed.map(opt => `<li>✓ ${opt}</li>`).join('') +
-                        '</ul>';
-                }
-                
-                resultContent.innerHTML = `
-                    <p><strong>Optimization Type:</strong> ${result.optimization_type}</p>
-                    <p><strong>Memory Before:</strong> ${formatBytes(result.memory_before.used)} / ${formatBytes(result.memory_before.total)}</p>
-                    <p><strong>Memory After:</strong> ${formatBytes(result.memory_after.used)} / ${formatBytes(result.memory_after.total)}</p>
-                    <p><strong>Memory Freed:</strong> ${formatBytes(result.freed_memory)}</p>
-                    <p><strong>Optimizations Performed:</strong></p>
-                    ${optimizationsList}
-                    <p><strong>Status:</strong> ${result.message}</p>
-                `;
-                
-                resultDiv.style.display = 'block';
-                
-                const notificationMsg = result.freed_memory > 0
-                    ? `Memory optimization complete! Freed ${formatBytes(result.freed_memory)}`
-                    : 'Memory optimization complete!';
-                showNotification(notificationMsg, 'success');
-                
-                await loadMemoryInfo();
+                await operationQueue.add(
+                    async () => {
+                        const result = useAdmin
+                            ? await invoke('optimize_memory_admin')
+                            : await invoke('optimize_memory');
+                        
+                        console.log('Optimization result:', result);
+                        
+                        const resultDiv = document.getElementById('optimization-result');
+                        const resultContent = resultDiv.querySelector('.result-content');
+                        
+                        let optimizationsList = '';
+                        if (result.optimizations_performed && result.optimizations_performed.length > 0) {
+                            optimizationsList = '<ul>' +
+                                result.optimizations_performed.map(opt => `<li>✓ ${opt}</li>`).join('') +
+                                '</ul>';
+                        }
+                        
+                        resultContent.innerHTML = `
+                            <p><strong>Optimization Type:</strong> ${result.optimization_type}</p>
+                            <p><strong>Memory Before:</strong> ${formatBytes(result.memory_before.used)} / ${formatBytes(result.memory_before.total)}</p>
+                            <p><strong>Memory After:</strong> ${formatBytes(result.memory_after.used)} / ${formatBytes(result.memory_after.total)}</p>
+                            <p><strong>Memory Freed:</strong> ${formatBytes(result.freed_memory)}</p>
+                            <p><strong>Optimizations Performed:</strong></p>
+                            ${optimizationsList}
+                            <p><strong>Status:</strong> ${result.message}</p>
+                        `;
+                        
+                        resultDiv.style.display = 'block';
+                        
+                        await loadMemoryInfo();
+                        return result;
+                    },
+                    { 
+                        debounce: 1000, 
+                        id: 'optimize-memory', 
+                        priority: 2,
+                        description: useAdmin ? 'Deep Memory Optimization (Admin)' : 'Memory Optimization',
+                        timeout: 15000
+                    }
+                );
             } catch (error) {
                 console.error('Error optimizing memory:', error);
                 showNotification('Memory optimization failed: ' + error, 'error');
+            } finally {
+                button.disabled = false;
+                button.classList.remove('loading');
             }
         }
     });
