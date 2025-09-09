@@ -1,42 +1,55 @@
 // src/memory_optimizer/non_admin.rs
 
-
-
 use tokio::time::{sleep, Duration};
 use tokio::process::Command as TokioCommand;
 
 use super::stats;
+use super::utils::{MEMORY_POOL, calculate_adaptive_chunk_size};
 
 pub(crate) async fn clear_inactive_memory_safe() -> Result<u64, String> {
-    let before = stats::get_memory_stats()?;
+    clear_inactive_memory_adaptive().await
+}
 
+pub(crate) async fn clear_inactive_memory_adaptive() -> Result<u64, String> {
+    let stats = stats::get_memory_stats()?;
+    let memory_pressure = (stats.used as f32 / stats.total as f32) * 100.0;
+    
+    // Adapt chunk size based on available memory
+    let chunk_size = calculate_adaptive_chunk_size(memory_pressure);
+    
+    // Progressive pressure with early exit
+    let mut total_freed = 0u64;
+    let target_free = stats.total / 10; // Target 10% free memory
+    
     // Force sync to write dirty pages
     TokioCommand::new("sync")
         .output()
         .await
         .map_err(|e| format!("Failed to sync: {}", e))?;
-
-    // Allocate and free memory to trigger compaction using safe Vec
-    let chunks = 10;
-    let chunk_size = 50 * 1024 * 1024; // 50MB chunks
-    let mut memory_chunks = Vec::new();
-
-    for _ in 0..chunks {
-        let chunk: Vec<u8> = vec![0; chunk_size];
-        memory_chunks.push(chunk);
+    
+    for _ in 0..10 {
+        let current_stats = stats::get_memory_stats()?;
+        if current_stats.available >= target_free {
+            break; // Early exit if target reached
+        }
+        
+        // Use memory pool for efficient allocation
+        let chunk = MEMORY_POOL.acquire().await;
+        sleep(Duration::from_millis(50)).await;
+        
+        // Release back to pool
+        MEMORY_POOL.release(chunk).await;
+        
+        let new_stats = stats::get_memory_stats()?;
+        let freed = new_stats.available.saturating_sub(current_stats.available);
+        total_freed += freed;
+        
+        if freed < (chunk_size / 10) as u64 {
+            break; // Stop if not effective
+        }
     }
-
-    // Free all chunks
-    drop(memory_chunks);
-
-    sleep(Duration::from_millis(500)).await;
-
-    let after = stats::get_memory_stats()?;
-    Ok(if after.available > before.available {
-        after.available - before.available
-    } else {
-        0
-    })
+    
+    Ok(total_freed)
 }
 
 pub(crate) async fn optimize_file_caches() -> Result<(), String> {

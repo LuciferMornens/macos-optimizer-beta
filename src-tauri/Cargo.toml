@@ -32,4 +32,18 @@ tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 rayon = "1.8"
 uuid = { version = "1.0", features = ["v4"] }
+dashmap = "5.5"
+lru = "0.12"
+lazy_static = "1.4"
+num_cpus = "1.16"
 
+[features]
+default = ["parallel-scan", "metrics"]
+# Enable faster file scanning with Rayon + DashMap
+parallel-scan = []
+# Enable metadata caching structures (not required for core scanning)
+metadata-cache = []
+# Background cache refresher depends on metadata-cache
+cache-refresh = ["metadata-cache"]
+# Lightweight operation timing/metrics helpers
+metrics = []

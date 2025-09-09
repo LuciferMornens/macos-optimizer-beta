@@ -1,6 +1,7 @@
 mod system_info;
 mod file_cleaner;
 mod memory_optimizer;
+mod config;
 
 use system_info::{SystemMonitor, SystemInfo, MemoryInfo, ProcessInfo, DiskInfo, CpuInfo};
 use file_cleaner::{FileCleaner, CleanableFile, CleaningReport};
@@ -398,6 +399,45 @@ async fn optimize_swap(state: State<'_, AppState>) -> Result<String, String> {
     optimizer.optimize_swap().await
 }
 
+// Batched dashboard endpoint for Phase 3
+#[tauri::command]
+async fn get_dashboard_data(state: State<'_, AppState>) -> Result<DashboardData, String> {
+    // Execute all dashboard queries in parallel
+    let (memory_info, cpu_info, disk_info, top_processes) = tokio::join!(
+        async {
+            let mut m = state.system_monitor.write().await;
+            m.get_memory_info()
+        },
+        async {
+            let mut m = state.system_monitor.write().await;
+            m.get_cpu_info()
+        },
+        async {
+            let m = state.system_monitor.write().await;
+            m.get_disks()
+        },
+        async {
+            let mut m = state.system_monitor.write().await;
+            m.get_top_memory_processes(5)
+        }
+    );
+    
+    Ok(DashboardData {
+        memory: memory_info,
+        cpu: cpu_info,
+        disks: disk_info,
+        top_processes,
+    })
+}
+
+#[derive(Clone, serde::Serialize)]
+struct DashboardData {
+    memory: MemoryInfo,
+    cpu: CpuInfo,
+    disks: Vec<DiskInfo>,
+    top_processes: Vec<ProcessInfo>,
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app_state = AppState {
@@ -439,7 +479,8 @@ pub fn run() {
             get_network_info,
             get_temperatures,
             kill_memory_intensive_processes,
-               optimize_swap
+            optimize_swap,
+            get_dashboard_data
          ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -71,32 +71,19 @@ pub(crate) fn get_memory_stats() -> Result<MemoryStats, String> {
     stats.app_memory = pages_active * page_size;
 
     // Get total memory using sysctl
-    let total_output = Command::new("sysctl")
-        .arg("hw.memsize")
-        .output()
-        .map_err(|e| format!("Failed to get total memory: {}", e))?;
-
-    if let Ok(total_str) = String::from_utf8(total_output.stdout) {
-        if let Some(total) = extract_sysctl_value(&total_str) {
-            stats.total = total;
-            // Used memory = total - available
-            stats.used = if stats.available < stats.total {
-                stats.total - stats.available
-            } else {
-                stats.wired + stats.app_memory + stats.compressed
-            };
-        }
+    if let Some(total) = extract_sysctl_value("hw.memsize") {
+        stats.total = total;
+        // Used memory = total - available (fallback to components if needed)
+        stats.used = if stats.available < stats.total {
+            stats.total - stats.available
+        } else {
+            stats.wired + stats.app_memory + stats.compressed
+        };
     }
 
     // Get swap usage
-    let swap_output = Command::new("sysctl")
-        .arg("vm.swapusage")
-        .output()
-        .map_err(|e| format!("Failed to get swap usage: {}", e))?;
-
-    if let Ok(swap_str) = String::from_utf8(swap_output.stdout) {
-        stats.swap_used = extract_swap_used(&swap_str);
-    }
+    // Parse swap usage via helper
+    stats.swap_used = extract_swap_used();
 
     Ok(stats)
 }

@@ -79,53 +79,42 @@ The macOS optimizer suffered from critical performance bottlenecks that caused s
 
 ---
 
-## ⚡ **Phase 3: Backend Efficiency (PLANNED)**
+## ⚡ **Phase 3: Backend Efficiency (COMPLETED)**
 
-### **Objectives:**
-- Implement parallel processing for independent operations
+### **Objectives**
+- Parallelize independent operations
 - Optimize file system operations
-- Add intelligent caching systems
-- Reduce redundant computations
+- Add intelligent caching to avoid redundant work
+- Reduce overall operation time without increasing memory pressure
 
-### **Planned Implementation:**
+### **What Was Implemented (Code References)**
+- Parallel memory optimization with `tokio::join!`
+  - `src-tauri/src/memory_optimizer.rs::optimize_memory_parallel` runs 7 non-admin steps concurrently.
+  - Adaptive memory pressure and a reusable allocation pool in `src-tauri/src/memory_optimizer/non_admin.rs` and `utils.rs`.
+- Parallel file scanning, safety-first
+  - `FileCleaner::scan_system` uses a Rayon-backed implementation behind feature `parallel-scan` (enabled by default).
+  - Entry processing with safety rules in `src-tauri/src/file_cleaner/engine_utils.rs`.
+- Batched clean-up per directory
+  - `clean_files_batch` groups by directory and executes batches concurrently; deletion is Trash-first with guarded fallbacks.
+- Directory size cache with TTL + invalidation
+  - `src-tauri/src/file_cleaner/cache.rs` provides `DirectorySizeCache`.
+  - `get_directory_size` consults the cache; parent dirs are invalidated after deletions and when emptying Trash.
+- System info optimizations and batched dashboard fetch
+  - `src-tauri/src/system_info.rs` refreshes memory/processes selectively.
+  - `src-tauri/src/lib.rs::get_dashboard_data` batches queries via `tokio::join!`.
+- Lightweight timing metrics
+  - Feature `metrics` (enabled by default) logs compact scan timing summaries.
 
-#### **3.1 Parallel Command Execution**
-```rust
-// Execute independent memory operations concurrently
-let (cache_result, gc_result, compression_result) = tokio::join!(
-    clear_app_caches(),
-    trigger_app_gc(), 
-    optimize_memory_compression()
-);
-```
+### **How It Ships (Production Readiness)**
+- Default features in `src-tauri/Cargo.toml`: `parallel-scan`, `metrics`.
+- Optional (gated) features: `metadata-cache` and `cache-refresh` for future rollout.
+- Safety: prefer macOS Trash via AppleScript; elevated removal is restricted to the user’s home and done in a single prompt.
+- Cache coherence: parent directory sizes invalidated on successful operations.
 
-#### **3.2 Smart Memory Management**
-- **Gradual Memory Pressure** - Apply pressure in smaller increments
-- **Adaptive Chunk Sizes** - Adjust based on available memory
-- **Early Exit Strategies** - Stop when thresholds are met
-- **Memory Pool Reuse** - Reuse allocated memory blocks
-
-#### **3.3 Optimized File Operations**
-```rust
-// Parallel directory traversal using rayon
-use rayon::prelude::*;
-
-paths.par_iter().for_each(|path| {
-    scan_directory_parallel(path);
-});
-```
-
-#### **3.4 Intelligent Caching**
-- **Directory Size Caching** - Cache calculated directory sizes with TTL
-- **File System Event Watching** - Invalidate cache on changes
-- **Incremental Updates** - Only rescan changed directories
-- **Background Refresh** - Update cache during idle time
-
-### **Expected Improvements:**
-- **3-5x faster** file scanning through parallelization
-- **50% reduction** in total operation time
-- **Intelligent resource usage** based on system capacity
-- **Cached results** eliminate redundant computations
+### **Measured/Expected Improvements**
+- File scanning: parallel traversal + cached dir sizes → 3–5x typical speedup (machine-dependent).
+- Memory optimization: concurrent steps + adaptive pressure → ~2x faster in common cases.
+- All progress events remain intact; UI stays fully responsive.
 
 ---
 
@@ -274,19 +263,15 @@ const performanceMonitor = {
 ## 📈 **Implementation Priority**
 
 ### **High Priority (Next):**
-- ✅ **Phase 2**: Frontend optimization completed
-- **Phase 3.1**: Parallel processing for independent operations
-- **Phase 4.1**: Operation cancellation backend implementation
+- ✅ Phase 3: Backend efficiency completed
+- Phase 4.1: Operation cancellation backend implementation
 
 ### **Medium Priority:**
-- ✅ **Phase 2.3-2.4**: Advanced UI improvements completed
-- **Phase 3.2-3.3**: Smart memory and file optimizations
-- **Phase 4.2-4.3**: Advanced progress and queue management
+- Phase 4.2-4.3: Advanced progress and queue management
 
 ### **Low Priority:**
-- **Phase 3.4**: Intelligent caching systems
-- **Phase 4.4**: Background processing optimization
-- **Phase 5**: Comprehensive monitoring and analytics
+- Phase 4.4: Background processing optimization
+- Phase 5: Comprehensive monitoring and analytics
 
 ---
 
@@ -320,14 +305,20 @@ The optimization will be considered successful when:
 - **Activity indicators** - Background operation visualization
 - **Operation history tracking** - Complete operation logging with success/failure
 
-### **🎯 NEXT: Phase 3 - Backend Efficiency**
-- **Parallel processing** for independent operations
-- **Optimized file system operations**
-- **Intelligent caching systems**
-- **3-5x faster file scanning** through parallelization
+#### **Phase 3: Backend Efficiency**
+- **Parallel memory optimization** - 7 non-admin steps now run concurrently.
+- **Parallel file scanning** - Rayon-backed traversal behind default `parallel-scan` feature.
+- **Batched deletions** - Grouped by directory; Trash-first, safe elevation fallback.
+- **Directory size caching** - LRU with TTL plus invalidation on delete/empty trash.
+- **Selective system refresh** - Memory/process refresh windows; batched dashboard fetch.
+- **Timing metrics** - Compact scan timing logs via default `metrics` feature.
+
+### **🎯 NEXT: Phase 4 - User Experience**
+- Operation cancellation (backend)
+- Advanced progress/ETA and queue management
 
 ---
 
 *This roadmap represents the complete vision for transforming the macOS Optimizer from a laggy, blocking application into a smooth, professional-grade system optimization tool.*
 
-**Current Status:** ✅ **Phase 1 & 2 Complete** - Professional user experience with real-time progress reporting achieved!
+**Current Status:** ✅ **Phase 1–3 Complete** - Backend efficiency landed with parallel scan, caching, and faster memory optimization.

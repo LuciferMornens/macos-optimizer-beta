@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, Pid, Networks, Components, Disks};
 use libc::{kill as libc_kill, SIGKILL, SIGTERM};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemInfo {
@@ -12,7 +13,7 @@ pub struct SystemInfo {
     pub boot_time: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryInfo {
     pub total_memory: u64,
     pub used_memory: u64,
@@ -24,7 +25,7 @@ pub struct MemoryInfo {
     pub memory_pressure: f32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessInfo {
     pub pid: u32,
     pub name: String,
@@ -35,7 +36,7 @@ pub struct ProcessInfo {
     pub parent_pid: Option<u32>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiskInfo {
     pub name: String,
     pub mount_point: String,
@@ -56,7 +57,7 @@ pub struct NetworkInfo {
     pub transmitted_packets: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CpuInfo {
     pub brand: String,
     pub frequency: u64,
@@ -75,17 +76,60 @@ pub struct TemperatureInfo {
 
 pub struct SystemMonitor {
     system: System,
+    last_full_refresh: Instant,
+    last_process_refresh: Instant,
+    last_memory_refresh: Instant,
+    refresh_interval: Duration,
+}
+
+enum RefreshComponent {
+    Memory,
+    Processes,
+    All,
 }
 
 impl SystemMonitor {
     pub fn new() -> Self {
         let mut system = System::new_all();
         system.refresh_all();
-        SystemMonitor { system }
+        SystemMonitor { 
+            system,
+            last_full_refresh: Instant::now(),
+            last_process_refresh: Instant::now(),
+            last_memory_refresh: Instant::now(),
+            refresh_interval: Duration::from_secs(5),
+        }
     }
 
     pub fn refresh(&mut self) {
-        self.system.refresh_all();
+        self.refresh_selective(RefreshComponent::All);
+    }
+    
+    fn refresh_selective(&mut self, component: RefreshComponent) {
+        let now = Instant::now();
+        
+        match component {
+            RefreshComponent::Memory => {
+                if now.duration_since(self.last_memory_refresh) > Duration::from_millis(500) {
+                    self.system.refresh_memory();
+                    self.last_memory_refresh = now;
+                }
+            },
+            RefreshComponent::Processes => {
+                if now.duration_since(self.last_process_refresh) > Duration::from_secs(1) {
+                    self.system.refresh_processes();
+                    self.last_process_refresh = now;
+                }
+            },
+            RefreshComponent::All => {
+                if now.duration_since(self.last_full_refresh) > self.refresh_interval {
+                    self.system.refresh_all();
+                    self.last_full_refresh = now;
+                    self.last_process_refresh = now;
+                    self.last_memory_refresh = now;
+                }
+            },
+        }
     }
 
     pub fn get_system_info(&self) -> SystemInfo {
@@ -99,7 +143,8 @@ impl SystemMonitor {
         }
     }
 
-    pub fn get_memory_info(&self) -> MemoryInfo {
+    pub fn get_memory_info(&mut self) -> MemoryInfo {
+        self.refresh_selective(RefreshComponent::Memory);
         let total_memory = self.system.total_memory();
         let used_memory = self.system.used_memory();
         let available_memory = self.system.available_memory();
@@ -123,7 +168,8 @@ impl SystemMonitor {
         }
     }
 
-    pub fn get_processes(&self) -> Vec<ProcessInfo> {
+    pub fn get_processes(&mut self) -> Vec<ProcessInfo> {
+        self.refresh_selective(RefreshComponent::Processes);
         self.system
             .processes()
             .iter()
@@ -139,7 +185,8 @@ impl SystemMonitor {
             .collect()
     }
 
-    pub fn get_top_memory_processes(&self, limit: usize) -> Vec<ProcessInfo> {
+    pub fn get_top_memory_processes(&mut self, limit: usize) -> Vec<ProcessInfo> {
+        self.refresh_selective(RefreshComponent::Processes);
         let mut processes = self.get_processes();
         processes.sort_by(|a, b| b.memory_usage.cmp(&a.memory_usage));
         processes.truncate(limit);
@@ -183,7 +230,8 @@ impl SystemMonitor {
             .collect()
     }
 
-    pub fn get_cpu_info(&self) -> CpuInfo {
+    pub fn get_cpu_info(&mut self) -> CpuInfo {
+        self.refresh_selective(RefreshComponent::Memory);
         let cpus = self.system.cpus();
         let cpu_usage = cpus.iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32;
         

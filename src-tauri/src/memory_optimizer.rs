@@ -55,72 +55,84 @@ impl MemoryOptimizer {
 
     // Public API unchanged: orchestrates non-admin steps via non_admin module.
     pub async fn optimize_memory(&self) -> Result<MemoryOptimizationResult, String> {
+        self.optimize_memory_parallel().await
+    }
+    
+    // New parallel version for Phase 3
+    pub async fn optimize_memory_parallel(&self) -> Result<MemoryOptimizationResult, String> {
         let memory_before = Self::get_memory_stats()?;
-
-        let mut success = true;
-        let mut message = String::new();
+        
+        // Execute all independent operations in parallel
+        let (inactive_result, cache_result, app_cache_result, compression_result, 
+             network_result, gc_result, temp_result) = tokio::join!(
+            non_admin::clear_inactive_memory_safe(),
+            non_admin::optimize_file_caches(),
+            non_admin::clear_app_caches(),
+            non_admin::optimize_memory_compression(),
+            non_admin::clear_network_caches_safe(),
+            non_admin::trigger_app_gc(),
+            non_admin::clear_temp_allocations()
+        );
+        
+        // Collect results
         let mut optimizations_performed = Vec::new();
-
-        // 1. Clear inactive memory pages (non-sudo)
-        if let Ok(freed) = non_admin::clear_inactive_memory_safe().await {
+        let mut message = String::new();
+        let mut success = true;
+        
+        // Process results from parallel operations
+        if let Ok(freed) = inactive_result {
             if freed > 0 {
                 optimizations_performed.push(format!("Cleared {} MB of inactive memory", freed / (1024 * 1024)));
                 message.push_str(&format!("Freed {} MB from inactive memory\n", freed / (1024 * 1024)));
             }
         }
-
-        // 2. Optimize file system caches
-        if let Ok(_) = non_admin::optimize_file_caches().await {
+        
+        if cache_result.is_ok() {
             optimizations_performed.push("Optimized file system caches".to_string());
             message.push_str("Optimized file system caches\n");
         }
-
-        // 3. Clear application caches (non-sudo)
-        if let Ok(cleared) = non_admin::clear_app_caches().await {
+        
+        if let Ok(cleared) = app_cache_result {
             optimizations_performed.push(format!("Cleared {} application caches", cleared));
             message.push_str(&format!("Cleared {} application caches\n", cleared));
         }
-
-        // 4. Optimize memory compression
-        if let Ok(_) = non_admin::optimize_memory_compression().await {
+        
+        if compression_result.is_ok() {
             optimizations_performed.push("Optimized memory compression".to_string());
             message.push_str("Optimized memory compression\n");
         }
-
-        // 5. Clear DNS and network caches (non-sudo versions)
-        if let Ok(_) = non_admin::clear_network_caches_safe().await {
+        
+        if network_result.is_ok() {
             optimizations_performed.push("Cleared network caches".to_string());
             message.push_str("Cleared network caches\n");
         }
-
-        // 6. Trigger garbage collection in running apps
-        if let Ok(apps) = non_admin::trigger_app_gc().await {
+        
+        if let Ok(apps) = gc_result {
             optimizations_performed.push(format!("Triggered GC in {} apps", apps));
             message.push_str(&format!("Triggered garbage collection in {} apps\n", apps));
         }
-
-        // 7. Clear temporary memory allocations
-        if let Ok(_) = non_admin::clear_temp_allocations().await {
+        
+        if temp_result.is_ok() {
             optimizations_performed.push("Cleared temporary allocations".to_string());
             message.push_str("Cleared temporary memory allocations\n");
         }
-
+        
         // Wait for optimizations to take effect with shorter delay
         sleep(Duration::from_millis(500)).await;
-
+        
         let memory_after = Self::get_memory_stats()?;
         let freed_memory = (memory_after.available as i64) - (memory_before.available as i64);
-
+        
         if optimizations_performed.is_empty() {
             success = false;
             message = "No optimizations could be performed without admin access".to_string();
         }
-
+        
         Ok(MemoryOptimizationResult {
             memory_before,
             memory_after,
             freed_memory: freed_memory.abs(),
-            optimization_type: "Comprehensive Safe Mode".to_string(),
+            optimization_type: "Parallel Optimization Mode".to_string(),
             success,
             message: message.trim().to_string(),
             optimizations_performed,
