@@ -5,13 +5,14 @@ mod config;
 mod ops;
 
 use system_info::{SystemMonitor, SystemInfo, MemoryInfo, ProcessInfo, DiskInfo, CpuInfo};
-use file_cleaner::{FileCleaner, CleanableFile, CleaningReport};
+use file_cleaner::{FileCleaner, CleanableFile, CleaningReport, EnhancedFileCleaner, EnhancedCleaningReport, UserAction};
 use memory_optimizer::{MemoryOptimizer, MemoryOptimizationResult, MemoryStats};
 
 use tauri::{Manager, State, Emitter};
 use tokio::sync::RwLock;
 use serde::Serialize;
 use ops::{OperationRegistry, OperationKind, ThroughputTracker};
+use file_cleaner::{RuleValidator, DynamicRuleEngine, load_rules_result};
 
 // Progress event types for real-time operation feedback
 #[derive(Clone, Serialize)]
@@ -51,6 +52,7 @@ struct Throughput {
 struct AppState {
     system_monitor: RwLock<SystemMonitor>,
     file_cleaner: RwLock<FileCleaner>,
+    enhanced_file_cleaner: RwLock<EnhancedFileCleaner>,
     memory_optimizer: RwLock<MemoryOptimizer>,
     ops: OperationRegistry,
 }
@@ -203,6 +205,85 @@ async fn scan_cleanable_files(app_handle: tauri::AppHandle, state: State<'_, App
 }
 
 #[tauri::command]
+async fn scan_cleanable_files_enhanced(app_handle: tauri::AppHandle, state: State<'_, AppState>) -> Result<EnhancedCleaningReport, String> {
+    let (operation_id, token) = state.ops.register(OperationKind::FileScan, true);
+    let start_time = std::time::Instant::now();
+    
+    // Emit start event
+    app_handle.emit("operation:start", OperationStartEvent {
+        operation_id: operation_id.clone(),
+        operation_type: "enhanced_file_scan".to_string(),
+        estimated_duration: Some(15000), // Enhanced scan takes longer
+    }).ok();
+    
+    let mut cleaner = state.enhanced_file_cleaner.write().await;
+    
+    // Progress updates for enhanced scan
+    app_handle.emit("progress:update", ProgressEvent {
+        operation_id: operation_id.clone(),
+        progress: 10.0,
+        message: "Starting enhanced file system scan with safety analysis...".to_string(),
+        stage: "initialization".to_string(),
+        can_cancel: true,
+        eta_ms: None,
+        throughput: None,
+    }).ok();
+    
+    // Perform the enhanced scan
+    let op_id = operation_id.clone();
+    let app_for_cb = app_handle.clone();
+    let progress_cb = move |progress: f32, message: &str, stage: &str| {
+        let _ = app_for_cb.emit("progress:update", ProgressEvent {
+            operation_id: op_id.clone(),
+            progress,
+            message: message.to_string(),
+            stage: stage.to_string(),
+            can_cancel: true,
+            eta_ms: None,
+            throughput: None,
+        });
+    };
+    let result = cleaner.scan_system_enhanced_with_cancel(&token, Some(&progress_cb)).await;
+    
+    let duration = start_time.elapsed().as_millis() as u32;
+    
+    match &result {
+        Ok(_) => {
+            app_handle.emit("progress:update", ProgressEvent {
+                operation_id: operation_id.clone(),
+                progress: 100.0,
+                message: "Enhanced scan completed with safety analysis".to_string(),
+                stage: "complete".to_string(),
+                can_cancel: false,
+                eta_ms: Some(0),
+                throughput: None,
+            }).ok();
+            
+            app_handle.emit("operation:complete", OperationCompleteEvent {
+                operation_id: operation_id.clone(),
+                success: true,
+                message: "Enhanced file scan completed".to_string(),
+                duration,
+                canceled: Some(false),
+            }).ok();
+            state.ops.finish_success(&operation_id);
+        },
+        Err(err) => {
+            app_handle.emit("operation:complete", OperationCompleteEvent {
+                operation_id: operation_id.clone(),
+                success: false,
+                message: format!("Enhanced scan failed: {}", err),
+                duration,
+                canceled: Some(false),
+            }).ok();
+            if err.contains("cancelled") { state.ops.finish_canceled(&operation_id); } else { state.ops.finish_failed(&operation_id, &err); }
+        }
+    }
+    
+    result
+}
+
+#[tauri::command]
 async fn get_cleanable_files(state: State<'_, AppState>) -> Result<Vec<CleanableFile>, String> {
     let cleaner = state.file_cleaner.read().await;
     Ok(cleaner.get_cleanable_files().clone())
@@ -218,6 +299,97 @@ async fn get_auto_selectable_files(state: State<'_, AppState>) -> Result<Vec<Cle
 async fn get_files_by_safety(state: State<'_, AppState>, min_safety_score: u8) -> Result<Vec<CleanableFile>, String> {
     let cleaner = state.file_cleaner.read().await;
     Ok(cleaner.get_files_by_safety(min_safety_score))
+}
+
+#[tauri::command]
+async fn clean_files_enhanced(
+    app_handle: tauri::AppHandle, 
+    state: State<'_, AppState>, 
+    file_paths: Vec<String>
+) -> Result<file_cleaner::enhanced_engine::CleaningResult, String> {
+    let (operation_id, token) = state.ops.register(OperationKind::FileClean, true);
+    app_handle.emit("operation:start", OperationStartEvent { 
+        operation_id: operation_id.clone(), 
+        operation_type: "enhanced_file_clean".into(), 
+        estimated_duration: None 
+    }).ok();
+
+    let mut cleaner = state.enhanced_file_cleaner.write().await;
+    
+    // Use enhanced cleaning with validation and recovery
+    let result = cleaner.clean_files_enhanced(file_paths, Some(&token)).await;
+    
+    match &result {
+        Ok(cleaning_result) => {
+            app_handle.emit("operation:complete", OperationCompleteEvent {
+                operation_id: operation_id.clone(),
+                success: true,
+                message: format!("Enhanced cleaning completed: {} files deleted, {} MB freed", 
+                    cleaning_result.deleted_count, 
+                    cleaning_result.total_freed / (1024 * 1024)),
+                duration: 0,
+                canceled: Some(false),
+            }).ok();
+            state.ops.finish_success(&operation_id);
+        },
+        Err(err) => {
+            app_handle.emit("operation:complete", OperationCompleteEvent {
+                operation_id: operation_id.clone(),
+                success: false,
+                message: format!("Enhanced cleaning failed: {}", err),
+                duration: 0,
+                canceled: Some(false),
+            }).ok();
+            if err.contains("cancelled") { state.ops.finish_canceled(&operation_id); } else { state.ops.finish_failed(&operation_id, &err); }
+        }
+    }
+    
+    result
+}
+
+#[tauri::command]
+async fn record_user_feedback(
+    state: State<'_, AppState>,
+    file_path: String,
+    action: String
+) -> Result<(), String> {
+    let mut cleaner = state.enhanced_file_cleaner.write().await;
+    
+    let user_action = match action.as_str() {
+        "selected" => UserAction::Selected,
+        "deselected" => UserAction::Deselected,
+        "ignored" => UserAction::Ignored,
+        _ => return Err("Invalid action".to_string()),
+    };
+    
+    cleaner.record_user_feedback(&file_path, user_action);
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_active_development_tools(_state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    // This provides information about active development tools
+    let checker = file_cleaner::smart_cache::AppActivityChecker::new();
+    Ok(checker.get_active_development_tools())
+}
+
+#[tauri::command]
+async fn preview_rules() -> Result<(Vec<file_cleaner::RuleConflict>, file_cleaner::DryRunReport), String> {
+    let base = load_rules_result()?;
+    let dyn_eng = DynamicRuleEngine::new();
+    let mut adapted = dyn_eng.adapt_rules_to_system(&base);
+    let mut extra = dyn_eng.generate_app_specific_rules();
+    adapted.categories.append(&mut extra);
+    let validator = RuleValidator::new();
+    let conflicts = validator.validate_rule_consistency(&adapted);
+    let report = validator.dry_run_rules(&adapted);
+    Ok((conflicts, report))
+}
+
+#[tauri::command]
+async fn get_enhanced_telemetry(state: State<'_, AppState>) -> Result<file_cleaner::telemetry::TelemetrySnapshot, String> {
+    let cleaner = state.enhanced_file_cleaner.read().await;
+    Ok(cleaner.telemetry_snapshot())
 }
 
 #[tauri::command]
@@ -549,6 +721,7 @@ pub fn run() {
     let app_state = AppState {
         system_monitor: RwLock::new(SystemMonitor::new()),
         file_cleaner: RwLock::new(FileCleaner::new()),
+        enhanced_file_cleaner: RwLock::new(EnhancedFileCleaner::new()),
         memory_optimizer: RwLock::new(MemoryOptimizer::new()),
         ops: OperationRegistry::new(1, 2, 1),
     };
@@ -573,10 +746,16 @@ pub fn run() {
             get_disks,
             kill_process,
             scan_cleanable_files,
+            scan_cleanable_files_enhanced,
             get_cleanable_files,
             get_auto_selectable_files,
             get_files_by_safety,
             clean_files,
+            clean_files_enhanced,
+            preview_rules,
+            get_enhanced_telemetry,
+            record_user_feedback,
+            get_active_development_tools,
             empty_trash,
             optimize_memory,
             optimize_memory_admin,

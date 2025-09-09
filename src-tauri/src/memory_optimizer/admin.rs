@@ -56,26 +56,7 @@ async fn write_script(script_path: &str) {
     }
 }
 
-#[allow(dead_code)]
-pub(crate) async fn run_deep_clean() -> AdminScriptOutcome {
-    let script_path = "/tmp/macos_optimizer_deep_clean.sh";
-    write_script(script_path).await;
-    let applescript = format!(r#"with timeout of 1200 seconds
-  do shell script "{}" with administrator privileges
-end timeout"#, script_path);
-
-    let result = Command::new("osascript").arg("-e").arg(applescript).output().await;
-    let _ = fs::remove_file(script_path);
-    match result {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let cancelled = stderr.contains("canceled") || stderr.contains("cancelled") || stderr.contains("-128");
-            AdminScriptOutcome { success: output.status.success(), stdout, stderr, cancelled }
-        }
-        Err(e) => AdminScriptOutcome { success: false, stdout: String::new(), stderr: format!("Failed to run admin script: {}", e), cancelled: false }
-    }
-}
+// "run_deep_clean" (non-cancellable) removed to avoid unused code; use the cancellable variant instead.
 
 pub(crate) async fn run_deep_clean_with_cancel(cancel: &CancellationToken) -> AdminScriptOutcome {
     let script_path = "/tmp/macos_optimizer_deep_clean.sh";

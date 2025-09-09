@@ -13,7 +13,7 @@ pub struct CleanableFile {
     pub auto_select: bool,  // Should be auto-selected for cleaning
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CleaningReport {
     pub total_size: u64,
     pub files_count: usize,
@@ -21,7 +21,7 @@ pub struct CleaningReport {
     pub advanced_categories: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CategoryReport {
     pub name: String,
     pub size: u64,
@@ -40,7 +40,6 @@ pub(crate) struct CategoryRule {
     pub(crate) name: String,
     pub(crate) paths: Vec<String>,
     pub(crate) safe: bool,
-    #[allow(dead_code)]
     pub(crate) advanced: Option<bool>,
     pub(crate) max_depth: Option<usize>,
     pub(crate) min_age_days: Option<i64>,
@@ -52,7 +51,7 @@ pub(crate) struct CategoryRule {
 }
 
 // Load rules with error propagation (for scan_system)
-pub(crate) fn load_rules_result() -> Result<CleanerRules, String> {
+pub fn load_rules_result() -> Result<CleanerRules, String> {
     let raw = include_str!("../../rules/cleaner_rules.json");
     serde_json::from_str(raw).map_err(|e| format!("Failed to parse cleaner rules: {}", e))
 }

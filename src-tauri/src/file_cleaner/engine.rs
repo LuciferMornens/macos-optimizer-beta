@@ -18,8 +18,7 @@ use walkdir::WalkDir;
 
 #[cfg(not(feature = "parallel-scan"))]
 use super::safety::{calculate_safety_score, is_safe_to_delete};
-#[cfg(feature = "metrics")]
-use crate::config::OperationMetrics;
+// Light build: metrics disabled to avoid unused code warnings.
 use super::cache::DIR_SIZE_CACHE;
 use super::types::{
     load_rules, load_rules_result, CategoryReport, CategoryRule, CleanableFile, CleanerRules,
@@ -46,140 +45,8 @@ impl FileCleaner {
         }
     }
 
-    /// Scan system according to embedded rules and produce a report.
-    #[cfg(not(feature = "parallel-scan"))]
-    pub async fn scan_system(&mut self) -> Result<CleaningReport, String> {
-        #[cfg(feature = "metrics")]
-        let mut metrics = OperationMetrics::new("file_scan".to_string());
-        self.cleanable_files.clear();
-        self.seen_paths.clear();
-        self.seen_dir_prefixes.clear();
-
-        // Load rule set (embedded at compile time)
-        let rules: CleanerRules = load_rules_result()?;
-
-        #[cfg(feature = "metrics")]
-        metrics.checkpoint("rules_loaded");
-        // Apply categories in order (specific first to avoid double counting)
-        for rule in rules.categories.iter() {
-            let paths_to_scan: Vec<_> = rule.paths.iter()
-                .filter_map(|p| Self::expand_path(p))
-                .filter(|path| path.exists())
-                .collect();
-                
-            if !paths_to_scan.is_empty() {
-                // Process each path with optimized batching
-                for path in paths_to_scan {
-                    if let Err(_) = self.scan_path_with_rule(&path, rule).await {
-                        continue;
-                    }
-                }
-                
-                // Small async yield to not block the executor
-                tokio::task::yield_now().await;
-            }
-        }
-
-        #[cfg(feature = "metrics")]
-        metrics.checkpoint("scan_complete");
-        let report = self.generate_report();
-        #[cfg(feature = "metrics")]
-        {
-            let summary = metrics.complete();
-            eprintln!(
-                "[scan] op={} total_ms={} files={} size={}B",
-                summary.operation,
-                summary.total_duration.as_millis(),
-                report.files_count,
-                report.total_size
-            );
-        }
-        Ok(report)
-    }
-
-    /// Scan system according to embedded rules and produce a report (parallel version).
-    #[cfg(feature = "parallel-scan")]
-    #[allow(dead_code)]
-    pub async fn scan_system(&mut self) -> Result<CleaningReport, String> {
-        #[cfg(feature = "metrics")]
-        let mut metrics = OperationMetrics::new("file_scan_parallel".to_string());
-        let report = self.scan_system_parallel().await?;
-        #[cfg(feature = "metrics")]
-        {
-            metrics.checkpoint("scan_complete");
-            let summary = metrics.complete();
-            eprintln!(
-                "[scan_parallel] op={} total_ms={} files={} size={}B",
-                summary.operation,
-                summary.total_duration.as_millis(),
-                report.files_count,
-                report.total_size
-            );
-        }
-        Ok(report)
-    }
-    
-    /// Parallel scan system using rayon for improved performance
-    #[cfg(feature = "parallel-scan")]
-    #[allow(dead_code)]
-    pub async fn scan_system_parallel(&mut self) -> Result<CleaningReport, String> {
-        self.cleanable_files.clear();
-        self.seen_paths.clear();
-        self.seen_dir_prefixes.clear();
-
-        let rules: CleanerRules = load_rules_result()?;
-        
-        // Use DashMap for thread-safe concurrent access
-        let found_files = Arc::new(DashMap::new());
-        let seen_paths = Arc::new(DashMap::new());
-        
-        // Group categories by priority (user paths first, system paths second)
-        let categories: Vec<_> = rules.categories.into_iter().collect();
-        let (user_rules, system_rules): (Vec<_>, Vec<_>) = categories.into_iter()
-            .partition(|r| !r.paths.iter().any(|p| p.starts_with("/System") || p.starts_with("/Library")));
-        
-        // Process user paths in parallel (safer)
-        let found_files_clone = found_files.clone();
-        let seen_paths_clone = seen_paths.clone();
-        
-        user_rules.par_iter().for_each(|rule| {
-            let paths: Vec<_> = rule.paths.iter()
-                .filter_map(|p| Self::expand_path(p))
-                .filter(|path| path.exists())
-                .collect();
-            
-            paths.par_iter().for_each(|path| {
-                let _ = self.scan_path_parallel(path, rule, found_files_clone.clone(), seen_paths_clone.clone());
-            });
-        });
-        
-        // Process system paths with limited parallelism
-        let found_files_clone = found_files.clone();
-        let seen_paths_clone = seen_paths.clone();
-        
-        system_rules.par_iter()
-            .for_each(|rule| {
-                let paths: Vec<_> = rule.paths.iter()
-                    .filter_map(|p| Self::expand_path(p))
-                    .filter(|path| path.exists())
-                    .collect();
-                
-                for path in paths {
-                    let _ = self.scan_path_parallel(&path, rule, found_files_clone.clone(), seen_paths_clone.clone());
-                }
-            });
-        
-        // Convert DashMap to Vec for report generation
-        self.cleanable_files = found_files.iter()
-            .map(|entry| entry.value().clone())
-            .collect();
-        
-        self.seen_paths = seen_paths.iter()
-            .map(|entry| entry.key().clone())
-            .collect();
-        
-        Ok(self.generate_report())
-    }
+    // Standalone scan methods removed; use `scan_system_with_cancel` which
+    // supports both parallel and serial paths with cancellation.
 
     /// Cancellable scan wrapper
     pub async fn scan_system_with_cancel(&mut self, cancel: &CancellationToken) -> Result<CleaningReport, String> {
@@ -286,43 +153,7 @@ impl FileCleaner {
         Ok(())
     }
     
-    #[cfg(feature = "parallel-scan")]
-    #[allow(dead_code)]
-    fn scan_path_parallel(
-        &self,
-        path: &Path,
-        rule: &CategoryRule,
-        found_files: Arc<DashMap<String, CleanableFile>>,
-        seen_paths: Arc<DashMap<String, bool>>,
-    ) -> Result<(), String> {
-        if !path.exists() {
-            return Ok(());
-        }
-        
-        // Use rayon's parallel iterator for directory traversal
-        WalkDir::new(path)
-            .max_depth(rule.max_depth.unwrap_or(10))
-            .into_iter()
-            .par_bridge() // Convert to parallel iterator
-            .filter_map(|e| e.ok())
-            .for_each(|entry| {
-                let file_path = entry.path();
-                let path_str = file_path.to_string_lossy().to_string();
-                
-                // Check if already seen (thread-safe)
-                if seen_paths.contains_key(&path_str) {
-                    return;
-                }
-                
-                // Process file/directory based on rule criteria
-                if let Some(cleanable) = self.process_entry(&entry, rule) {
-                    found_files.insert(path_str.clone(), cleanable);
-                    seen_paths.insert(path_str, true);
-                }
-            });
-        
-        Ok(())
-    }
+    // The remaining parallel implementation is the cancellable variant below.
 
     #[cfg(feature = "parallel-scan")]
     fn scan_path_parallel_with_cancel(
@@ -664,51 +495,7 @@ impl FileCleaner {
         &self.cleanable_files
     }
 
-    /// Remove selected items.
-    /// - We prefer moving to Trash (recoverable) and only fall back to direct removal if needed.
-    /// - We allow deletion of items that appeared in the latest scan, even if marked "review".
-    #[allow(dead_code)]
-    pub async fn clean_files(&self, file_paths: Vec<String>) -> Result<(u64, usize), String> {
-        self.clean_files_batch(file_paths).await
-    }
-    
-    #[allow(dead_code)]
-    pub async fn clean_files_batch(&self, file_paths: Vec<String>) -> Result<(u64, usize), String> {
-        // Group files by directory for batch operations
-        let mut files_by_dir: HashMap<PathBuf, Vec<String>> = HashMap::new();
-        
-        for path_str in &file_paths {
-            let path = Path::new(&path_str);
-            if let Some(parent) = path.parent() {
-                files_by_dir.entry(parent.to_path_buf())
-                    .or_insert_with(Vec::new)
-                    .push(path_str.clone());
-            } else {
-                // Handle root-level files separately
-                files_by_dir.entry(PathBuf::from("/"))
-                    .or_insert_with(Vec::new)
-                    .push(path_str.clone());
-            }
-        }
-        
-        // Process directories in parallel
-        let results: Vec<_> = files_by_dir.into_par_iter()
-            .map(|(dir, files)| {
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
-                        self.clean_directory_batch(dir, files).await
-                    })
-                })
-            })
-            .collect();
-        
-        // Aggregate results
-        let total_freed = results.iter().map(|r| r.0).sum();
-        let items_removed = results.iter().map(|r| r.1).sum();
-        
-        Ok((total_freed, items_removed))
-    }
-    
+    /// Remove selected items in cancellable batches via `clean_files_with_cancel`.
     async fn clean_directory_batch(&self, _dir: PathBuf, files: Vec<String>) -> (u64, usize) {
         let mut total_freed = 0u64;
         let mut items_removed = 0usize;

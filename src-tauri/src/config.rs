@@ -47,42 +47,4 @@ lazy_static! {
 }
 
 // Operation metrics tracking
-use std::time::Instant;
-
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct OperationMetrics {
-    pub operation: String,
-    pub start_time: Instant,
-    pub checkpoints: Vec<(String, std::time::Duration)>,
-}
-
-#[allow(dead_code)]
-impl OperationMetrics {
-    pub fn new(operation: String) -> Self {
-        OperationMetrics {
-            operation,
-            start_time: Instant::now(),
-            checkpoints: Vec::new(),
-        }
-    }
-    
-    pub fn checkpoint(&mut self, name: &str) {
-        self.checkpoints.push((name.to_string(), self.start_time.elapsed()));
-    }
-    
-    pub fn complete(self) -> OperationReport {
-        OperationReport {
-            operation: self.operation,
-            total_duration: self.start_time.elapsed(),
-            checkpoints: self.checkpoints,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct OperationReport {
-    pub operation: String,
-    pub total_duration: std::time::Duration,
-    pub checkpoints: Vec<(String, std::time::Duration)>,
-}
+// Removed lightweight timing helpers to keep the crate warning-free.
