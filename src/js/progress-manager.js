@@ -60,10 +60,10 @@ class ProgressManager {
     }
     
     onProgressUpdate(payload) {
-        const { operation_id, progress, message, stage, can_cancel } = payload;
+        const { operation_id, progress, message, stage, can_cancel, eta_ms, throughput } = payload;
         
         // Update progress bar
-        this.updateProgress(operation_id, progress, message, stage);
+        this.updateProgress(operation_id, progress, message, stage, eta_ms, throughput);
         
         // Update global activity message
         const operation = this.activeOperations.get(operation_id);
@@ -191,7 +191,7 @@ class ProgressManager {
         return progressBar;
     }
     
-    updateProgress(operationId, progress, message, stage) {
+    updateProgress(operationId, progress, message, stage, etaMs, throughput) {
         const bar = this.progressBars.get(operationId);
         if (!bar) return;
         
@@ -215,7 +215,18 @@ class ProgressManager {
         }
         
         if (stageEl) {
-            stageEl.textContent = stage ? `Stage: ${stage}` : '';
+            let extra = '';
+            if (etaMs !== undefined && etaMs !== null && etaMs > 0) {
+                const secs = Math.round(etaMs / 1000);
+                extra += ` • ETA: ${secs}s`;
+            }
+            if (throughput && (throughput.files_per_s || throughput.mb_per_s)) {
+                const fps = throughput.files_per_s ? `${throughput.files_per_s.toFixed(1)} f/s` : '';
+                const mbs = throughput.mb_per_s ? `${throughput.mb_per_s.toFixed(1)} MB/s` : '';
+                const thr = [fps, mbs].filter(Boolean).join(' ');
+                if (thr) extra += ` • ${thr}`;
+            }
+            stageEl.textContent = stage ? `Stage: ${stage}${extra}` : extra;
         }
         
         // Show/hide cancel button based on operation stage
@@ -265,13 +276,19 @@ class ProgressManager {
         return indicator;
     }
     
-    cancelOperation(operationId) {
+    async cancelOperation(operationId) {
         console.log('Cancellation requested for operation:', operationId);
-        // TODO: Implement cancellation mechanism
-        // This would require backend support for cancellation tokens
-        
-        if (window.showNotification) {
-            window.showNotification('Operation cancellation requested', 'info');
+        try {
+            const { invoke } = window.__TAURI__.tauri;
+            await invoke('cancel_operation', { operation_id: operationId });
+            if (window.showNotification) {
+                window.showNotification('Operation canceled', 'info');
+            }
+        } catch (e) {
+            console.error('Failed to cancel operation', e);
+            if (window.showNotification) {
+                window.showNotification('Failed to cancel operation', 'error');
+            }
         }
     }
     

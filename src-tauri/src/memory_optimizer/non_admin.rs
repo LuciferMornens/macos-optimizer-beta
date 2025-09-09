@@ -2,15 +2,16 @@
 
 use tokio::time::{sleep, Duration};
 use tokio::process::Command as TokioCommand;
+use tokio_util::sync::CancellationToken;
 
 use super::stats;
 use super::utils::{MEMORY_POOL, calculate_adaptive_chunk_size};
 
 pub(crate) async fn clear_inactive_memory_safe() -> Result<u64, String> {
-    clear_inactive_memory_adaptive().await
+    clear_inactive_memory_adaptive_with_cancel(None).await
 }
 
-pub(crate) async fn clear_inactive_memory_adaptive() -> Result<u64, String> {
+pub(crate) async fn clear_inactive_memory_adaptive_with_cancel(cancel: Option<&CancellationToken>) -> Result<u64, String> {
     let stats = stats::get_memory_stats()?;
     let memory_pressure = (stats.used as f32 / stats.total as f32) * 100.0;
     
@@ -28,6 +29,7 @@ pub(crate) async fn clear_inactive_memory_adaptive() -> Result<u64, String> {
         .map_err(|e| format!("Failed to sync: {}", e))?;
     
     for _ in 0..10 {
+        if let Some(t) = cancel { if t.is_cancelled() { return Err("cancelled".into()); } }
         let current_stats = stats::get_memory_stats()?;
         if current_stats.available >= target_free {
             break; // Early exit if target reached

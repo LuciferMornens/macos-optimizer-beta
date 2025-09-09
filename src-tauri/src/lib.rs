@@ -2,6 +2,7 @@ mod system_info;
 mod file_cleaner;
 mod memory_optimizer;
 mod config;
+mod ops;
 
 use system_info::{SystemMonitor, SystemInfo, MemoryInfo, ProcessInfo, DiskInfo, CpuInfo};
 use file_cleaner::{FileCleaner, CleanableFile, CleaningReport};
@@ -10,6 +11,7 @@ use memory_optimizer::{MemoryOptimizer, MemoryOptimizationResult, MemoryStats};
 use tauri::{Manager, State, Emitter};
 use tokio::sync::RwLock;
 use serde::Serialize;
+use ops::{OperationRegistry, OperationKind, ThroughputTracker};
 
 // Progress event types for real-time operation feedback
 #[derive(Clone, Serialize)]
@@ -19,6 +21,8 @@ struct ProgressEvent {
     message: String,
     stage: String,
     can_cancel: bool,
+    eta_ms: Option<u32>,
+    throughput: Option<Throughput>,
 }
 
 #[derive(Clone, Serialize)]
@@ -34,6 +38,13 @@ struct OperationCompleteEvent {
     success: bool,
     message: String,
     duration: u32, // actual duration in ms
+    canceled: Option<bool>,
+}
+
+#[derive(Clone, Serialize)]
+struct Throughput {
+    files_per_s: Option<f32>,
+    mb_per_s: Option<f32>,
 }
 
 // Create a state to manage our system monitor
@@ -41,6 +52,7 @@ struct AppState {
     system_monitor: RwLock<SystemMonitor>,
     file_cleaner: RwLock<FileCleaner>,
     memory_optimizer: RwLock<MemoryOptimizer>,
+    ops: OperationRegistry,
 }
 
 #[tauri::command]
@@ -93,7 +105,7 @@ async fn kill_process(state: State<'_, AppState>, pid: u32) -> Result<(), String
 
 #[tauri::command]
 async fn scan_cleanable_files(app_handle: tauri::AppHandle, state: State<'_, AppState>) -> Result<CleaningReport, String> {
-    let operation_id = uuid::Uuid::new_v4().to_string();
+    let (operation_id, token) = state.ops.register(OperationKind::FileScan, true);
     let start_time = std::time::Instant::now();
     
     // Emit start event
@@ -111,6 +123,8 @@ async fn scan_cleanable_files(app_handle: tauri::AppHandle, state: State<'_, App
         message: "Starting file system scan...".to_string(),
         stage: "initialization".to_string(),
         can_cancel: true,
+        eta_ms: None,
+        throughput: None,
     }).ok();
     
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -121,6 +135,8 @@ async fn scan_cleanable_files(app_handle: tauri::AppHandle, state: State<'_, App
         message: "Scanning caches directory...".to_string(),
         stage: "caches".to_string(),
         can_cancel: true,
+        eta_ms: None,
+        throughput: None,
     }).ok();
     
     app_handle.emit("progress:update", ProgressEvent {
@@ -129,6 +145,8 @@ async fn scan_cleanable_files(app_handle: tauri::AppHandle, state: State<'_, App
         message: "Scanning temporary files...".to_string(),
         stage: "temp_files".to_string(),
         can_cancel: true,
+        eta_ms: None,
+        throughput: None,
     }).ok();
     
     app_handle.emit("progress:update", ProgressEvent {
@@ -136,10 +154,14 @@ async fn scan_cleanable_files(app_handle: tauri::AppHandle, state: State<'_, App
         progress: 75.0,
         message: "Analyzing file safety...".to_string(),
         stage: "analysis".to_string(),
-        can_cancel: false,
+        can_cancel: true,
+        eta_ms: None,
+        throughput: None,
     }).ok();
     
-    let result = cleaner.scan_system().await;
+    // Concurrency: limit scans
+    let _permit = state.ops.scan_sem.acquire().await;
+    let result = cleaner.scan_system_with_cancel(&token).await;
     
     let duration = start_time.elapsed().as_millis() as u32;
     
@@ -151,22 +173,29 @@ async fn scan_cleanable_files(app_handle: tauri::AppHandle, state: State<'_, App
                 message: "File scan completed successfully".to_string(),
                 stage: "complete".to_string(),
                 can_cancel: false,
+                eta_ms: Some(0),
+                throughput: None,
             }).ok();
             
             app_handle.emit("operation:complete", OperationCompleteEvent {
-                operation_id,
+                operation_id: operation_id.clone(),
                 success: true,
                 message: "File scan completed".to_string(),
                 duration,
+                canceled: Some(false),
             }).ok();
+            state.ops.finish_success(&operation_id);
         },
         Err(err) => {
+            let canceled = err.contains("cancelled");
             app_handle.emit("operation:complete", OperationCompleteEvent {
-                operation_id,
+                operation_id: operation_id.clone(),
                 success: false,
                 message: format!("File scan failed: {}", err),
                 duration,
+                canceled: Some(canceled),
             }).ok();
+            if canceled { state.ops.finish_canceled(&operation_id); } else { state.ops.finish_failed(&operation_id, &err); }
         }
     }
     
@@ -192,20 +221,59 @@ async fn get_files_by_safety(state: State<'_, AppState>, min_safety_score: u8) -
 }
 
 #[tauri::command]
-async fn clean_files(state: State<'_, AppState>, file_paths: Vec<String>) -> Result<(u64, usize), String> {
+async fn clean_files(app_handle: tauri::AppHandle, state: State<'_, AppState>, file_paths: Vec<String>) -> Result<(u64, usize), String> {
+    let (operation_id, token) = state.ops.register(OperationKind::FileClean, true);
+    app_handle.emit("operation:start", OperationStartEvent { operation_id: operation_id.clone(), operation_type: "file_clean".into(), estimated_duration: None }).ok();
+
+    // Concurrency control
+    let _permit = state.ops.clean_sem.acquire().await;
+
+    // Pre-compute totals for ETA/throughput
+    use std::fs;
+    let total_files = file_paths.len() as u64;
+    let mut total_bytes: u64 = 0;
+    for p in &file_paths { if let Ok(md) = fs::metadata(p) { total_bytes = total_bytes.saturating_add(md.len()); } }
+    let mut files_done = 0u64;
+    let mut bytes_done = 0u64;
+    let mut tracker = ThroughputTracker::default();
+
+    let chunk_size = 50usize;
+    let mut total_freed = 0u64;
+    let mut total_removed = 0usize;
     let cleaner = state.file_cleaner.read().await;
-    cleaner.clean_files(file_paths).await
+    for chunk in file_paths.chunks(chunk_size) {
+        if token.is_cancelled() { break; }
+        let (freed, removed) = cleaner.clean_files_with_cancel(chunk.to_vec(), &token).await?;
+        total_freed += freed; total_removed += removed;
+        files_done += chunk.len() as u64;
+        bytes_done = bytes_done.saturating_add(freed);
+        let (eta_ms, fps, mbs) = tracker.tick(files_done, bytes_done, total_files);
+        let progress = if total_files > 0 { (files_done as f32 / total_files as f32) * 100.0 } else { 100.0 };
+        app_handle.emit("progress:update", ProgressEvent { operation_id: operation_id.clone(), progress, message: format!("Cleaning files… {}/{}", files_done, total_files), stage: "deleting".into(), can_cancel: true, eta_ms, throughput: Some(Throughput { files_per_s: fps, mb_per_s: mbs }) }).ok();
+    }
+
+    let canceled = token.is_cancelled();
+    app_handle.emit("operation:complete", OperationCompleteEvent { operation_id: operation_id.clone(), success: !canceled, message: if canceled { "Cleaning canceled".into() } else { "Cleaning completed".into() }, duration: 0, canceled: Some(canceled) }).ok();
+    if canceled { state.ops.finish_canceled(&operation_id); } else { state.ops.finish_success(&operation_id); }
+    Ok((total_freed, total_removed))
 }
 
 #[tauri::command]
-async fn empty_trash(state: State<'_, AppState>) -> Result<(u64, usize), String> {
+async fn empty_trash(app_handle: tauri::AppHandle, state: State<'_, AppState>) -> Result<(u64, usize), String> {
+    let (operation_id, token) = state.ops.register(OperationKind::EmptyTrash, true);
+    app_handle.emit("operation:start", OperationStartEvent { operation_id: operation_id.clone(), operation_type: "empty_trash".into(), estimated_duration: None }).ok();
+    let _permit = state.ops.clean_sem.acquire().await;
     let cleaner = state.file_cleaner.read().await;
-    cleaner.empty_trash().await
+    let res = cleaner.empty_trash_with_cancel(&token).await;
+    let canceled = token.is_cancelled();
+    app_handle.emit("operation:complete", OperationCompleteEvent { operation_id: operation_id.clone(), success: res.is_ok() && !canceled, message: if canceled { "Trash empty canceled".into() } else { "Trash emptied".into() }, duration: 0, canceled: Some(canceled) }).ok();
+    if canceled { state.ops.finish_canceled(&operation_id); } else if res.is_ok() { state.ops.finish_success(&operation_id); } else { state.ops.finish_failed(&operation_id, "empty_trash failed"); }
+    res
 }
 
 #[tauri::command]
 async fn optimize_memory(app_handle: tauri::AppHandle, state: State<'_, AppState>) -> Result<MemoryOptimizationResult, String> {
-    let operation_id = uuid::Uuid::new_v4().to_string();
+    let (operation_id, token) = state.ops.register(OperationKind::MemOptimize, true);
     let start_time = std::time::Instant::now();
     
     // Emit start event
@@ -223,7 +291,9 @@ async fn optimize_memory(app_handle: tauri::AppHandle, state: State<'_, AppState
         progress: 10.0,
         message: "Starting memory optimization...".to_string(),
         stage: "initialization".to_string(),
-        can_cancel: false,
+        can_cancel: true,
+        eta_ms: None,
+        throughput: None,
     }).ok();
     
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -235,10 +305,13 @@ async fn optimize_memory(app_handle: tauri::AppHandle, state: State<'_, AppState
         message: "Clearing application caches...".to_string(),
         stage: "cache_clear".to_string(),
         can_cancel: true,
+        eta_ms: None,
+        throughput: None,
     }).ok();
     
-    // Perform the actual optimization
-    let result = optimizer.optimize_memory().await;
+    // Perform the actual optimization with cancel + concurrency guard
+    let _permit = state.ops.opt_sem.acquire().await;
+    let result = optimizer.optimize_memory_with_cancel(&token).await;
     
     let duration = start_time.elapsed().as_millis() as u32;
     
@@ -250,22 +323,29 @@ async fn optimize_memory(app_handle: tauri::AppHandle, state: State<'_, AppState
                 message: "Memory optimization completed successfully".to_string(),
                 stage: "complete".to_string(),
                 can_cancel: false,
+                eta_ms: Some(0),
+                throughput: None,
             }).ok();
             
             app_handle.emit("operation:complete", OperationCompleteEvent {
-                operation_id,
+                operation_id: operation_id.clone(),
                 success: true,
                 message: "Memory optimization completed".to_string(),
                 duration,
+                canceled: Some(false),
             }).ok();
+            state.ops.finish_success(&operation_id);
         },
         Err(err) => {
+            let canceled = err.contains("cancelled");
             app_handle.emit("operation:complete", OperationCompleteEvent {
-                operation_id,
+                operation_id: operation_id.clone(),
                 success: false,
                 message: format!("Memory optimization failed: {}", err),
                 duration,
+                canceled: Some(canceled),
             }).ok();
+            if canceled { state.ops.finish_canceled(&operation_id); } else { state.ops.finish_failed(&operation_id, &err); }
         }
     }
     
@@ -274,7 +354,7 @@ async fn optimize_memory(app_handle: tauri::AppHandle, state: State<'_, AppState
 
 #[tauri::command]
 async fn optimize_memory_admin(app_handle: tauri::AppHandle, state: State<'_, AppState>) -> Result<MemoryOptimizationResult, String> {
-    let operation_id = uuid::Uuid::new_v4().to_string();
+    let (operation_id, token) = state.ops.register(OperationKind::MemOptimizeAdmin, true);
     let start_time = std::time::Instant::now();
     
     // Emit start event
@@ -293,6 +373,8 @@ async fn optimize_memory_admin(app_handle: tauri::AppHandle, state: State<'_, Ap
         message: "Requesting administrator privileges...".to_string(),
         stage: "auth".to_string(),
         can_cancel: true,
+        eta_ms: None,
+        throughput: None,
     }).ok();
     
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -303,6 +385,8 @@ async fn optimize_memory_admin(app_handle: tauri::AppHandle, state: State<'_, Ap
         message: "Purging disk caches...".to_string(),
         stage: "disk_cache".to_string(),
         can_cancel: true,
+        eta_ms: None,
+        throughput: None,
     }).ok();
     
     app_handle.emit("progress:update", ProgressEvent {
@@ -311,6 +395,8 @@ async fn optimize_memory_admin(app_handle: tauri::AppHandle, state: State<'_, Ap
         message: "Clearing DNS and network caches...".to_string(),
         stage: "network_cache".to_string(),
         can_cancel: true,
+        eta_ms: None,
+        throughput: None,
     }).ok();
     
     app_handle.emit("progress:update", ProgressEvent {
@@ -319,10 +405,13 @@ async fn optimize_memory_admin(app_handle: tauri::AppHandle, state: State<'_, Ap
         message: "Optimizing memory compression...".to_string(),
         stage: "memory_compression".to_string(),
         can_cancel: false,
+        eta_ms: None,
+        throughput: None,
     }).ok();
     
     // Perform the actual admin optimization
-    let result = optimizer.optimize_memory_with_admin(true).await;
+    let _permit = state.ops.opt_sem.acquire().await;
+    let result = optimizer.optimize_memory_with_admin_cancel(&token).await;
     
     let duration = start_time.elapsed().as_millis() as u32;
     
@@ -334,22 +423,29 @@ async fn optimize_memory_admin(app_handle: tauri::AppHandle, state: State<'_, Ap
                 message: "Deep clean optimization completed successfully".to_string(),
                 stage: "complete".to_string(),
                 can_cancel: false,
+                eta_ms: Some(0),
+                throughput: None,
             }).ok();
             
             app_handle.emit("operation:complete", OperationCompleteEvent {
-                operation_id,
+                operation_id: operation_id.clone(),
                 success: true,
                 message: "Deep clean optimization completed".to_string(),
                 duration,
+                canceled: Some(false),
             }).ok();
+            state.ops.finish_success(&operation_id);
         },
         Err(err) => {
+            let canceled = err.contains("cancelled");
             app_handle.emit("operation:complete", OperationCompleteEvent {
-                operation_id,
+                operation_id: operation_id.clone(),
                 success: false,
                 message: format!("Deep clean optimization failed: {}", err),
                 duration,
+                canceled: Some(canceled),
             }).ok();
+            if canceled { state.ops.finish_canceled(&operation_id); } else { state.ops.finish_failed(&operation_id, &err); }
         }
     }
     
@@ -373,6 +469,16 @@ async fn get_memory_stats(state: State<'_, AppState>) -> Result<MemoryStats, Str
     // We don't need the optimizer instance, but lock to keep API consistent
     drop(state.memory_optimizer.read().await);
     MemoryOptimizer::get_memory_stats()
+}
+
+#[tauri::command]
+async fn cancel_operation(state: State<'_, AppState>, operation_id: String) -> Result<(), String> {
+    if state.ops.cancel(&operation_id) { Ok(()) } else { Err("Unknown operation".into()) }
+}
+
+#[tauri::command]
+async fn get_operation_state(state: State<'_, AppState>, operation_id: String) -> Result<Option<ops::OpState>, String> {
+    Ok(state.ops.get(&operation_id))
 }
 
 #[tauri::command]
@@ -444,6 +550,7 @@ pub fn run() {
         system_monitor: RwLock::new(SystemMonitor::new()),
         file_cleaner: RwLock::new(FileCleaner::new()),
         memory_optimizer: RwLock::new(MemoryOptimizer::new()),
+        ops: OperationRegistry::new(1, 2, 1),
     };
 
     tauri::Builder::default()
@@ -480,7 +587,9 @@ pub fn run() {
             get_temperatures,
             kill_memory_intensive_processes,
             optimize_swap,
-            get_dashboard_data
+            get_dashboard_data,
+            cancel_operation,
+            get_operation_state
          ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

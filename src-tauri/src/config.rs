@@ -49,6 +49,7 @@ lazy_static! {
 // Operation metrics tracking
 use std::time::Instant;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct OperationMetrics {
     pub operation: String,
@@ -56,6 +57,7 @@ pub struct OperationMetrics {
     pub checkpoints: Vec<(String, std::time::Duration)>,
 }
 
+#[allow(dead_code)]
 impl OperationMetrics {
     pub fn new(operation: String) -> Self {
         OperationMetrics {

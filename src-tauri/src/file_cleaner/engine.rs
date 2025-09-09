@@ -25,6 +25,7 @@ use super::types::{
     load_rules, load_rules_result, CategoryReport, CategoryRule, CleanableFile, CleanerRules,
     CleaningReport,
 };
+use tokio_util::sync::CancellationToken;
 
 /// macOS file cleaner with conservative safety heuristics + user override.
 pub struct FileCleaner {
@@ -98,6 +99,7 @@ impl FileCleaner {
 
     /// Scan system according to embedded rules and produce a report (parallel version).
     #[cfg(feature = "parallel-scan")]
+    #[allow(dead_code)]
     pub async fn scan_system(&mut self) -> Result<CleaningReport, String> {
         #[cfg(feature = "metrics")]
         let mut metrics = OperationMetrics::new("file_scan_parallel".to_string());
@@ -119,6 +121,7 @@ impl FileCleaner {
     
     /// Parallel scan system using rayon for improved performance
     #[cfg(feature = "parallel-scan")]
+    #[allow(dead_code)]
     pub async fn scan_system_parallel(&mut self) -> Result<CleaningReport, String> {
         self.cleanable_files.clear();
         self.seen_paths.clear();
@@ -178,6 +181,87 @@ impl FileCleaner {
         Ok(self.generate_report())
     }
 
+    /// Cancellable scan wrapper
+    pub async fn scan_system_with_cancel(&mut self, cancel: &CancellationToken) -> Result<CleaningReport, String> {
+        #[cfg(feature = "parallel-scan")]
+        {
+            if cancel.is_cancelled() { return Err("cancelled".into()); }
+            // Run parallel scan but guard inner workers to early-out
+            self.cleanable_files.clear();
+            self.seen_paths.clear();
+            self.seen_dir_prefixes.clear();
+
+            let rules: CleanerRules = load_rules_result()?;
+
+            let found_files = Arc::new(DashMap::new());
+            let seen_paths = Arc::new(DashMap::new());
+
+            let categories: Vec<_> = rules.categories.into_iter().collect();
+            let (user_rules, system_rules): (Vec<_>, Vec<_>) = categories.into_iter()
+                .partition(|r| !r.paths.iter().any(|p| p.starts_with("/System") || p.starts_with("/Library")));
+
+            let found_files_clone = found_files.clone();
+            let seen_paths_clone = seen_paths.clone();
+            let token = cancel.clone();
+            user_rules.par_iter().for_each(|rule| {
+                if token.is_cancelled() { return; }
+                let paths: Vec<_> = rule.paths.iter()
+                    .filter_map(|p| Self::expand_path(p))
+                    .filter(|path| path.exists())
+                    .collect();
+                paths.par_iter().for_each(|path| {
+                    if token.is_cancelled() { return; }
+                    let _ = self.scan_path_parallel_with_cancel(path, rule, found_files_clone.clone(), seen_paths_clone.clone(), &token);
+                });
+            });
+
+            let found_files_clone = found_files.clone();
+            let seen_paths_clone = seen_paths.clone();
+            let token = cancel.clone();
+            system_rules.par_iter().for_each(|rule| {
+                if token.is_cancelled() { return; }
+                let paths: Vec<_> = rule.paths.iter()
+                    .filter_map(|p| Self::expand_path(p))
+                    .filter(|path| path.exists())
+                    .collect();
+                for path in paths {
+                    if token.is_cancelled() { break; }
+                    let _ = self.scan_path_parallel_with_cancel(&path, rule, found_files_clone.clone(), seen_paths_clone.clone(), &token);
+                }
+            });
+
+            self.cleanable_files = found_files.iter().map(|e| e.value().clone()).collect();
+            self.seen_paths = seen_paths.iter().map(|e| e.key().clone()).collect();
+            if cancel.is_cancelled() { return Err("cancelled".into()); }
+            Ok(self.generate_report())
+        }
+
+        #[cfg(not(feature = "parallel-scan"))]
+        {
+            if cancel.is_cancelled() { return Err("cancelled".into()); }
+            self.cleanable_files.clear();
+            self.seen_paths.clear();
+            self.seen_dir_prefixes.clear();
+
+            let rules: CleanerRules = load_rules_result()?;
+            for rule in rules.categories.iter() {
+                if cancel.is_cancelled() { return Err("cancelled".into()); }
+                let paths_to_scan: Vec<_> = rule.paths.iter()
+                    .filter_map(|p| Self::expand_path(p))
+                    .filter(|path| path.exists())
+                    .collect();
+                if !paths_to_scan.is_empty() {
+                    for path in paths_to_scan {
+                        if cancel.is_cancelled() { return Err("cancelled".into()); }
+                        if let Err(_) = self.scan_path_with_rule(&path, rule).await { continue; }
+                    }
+                    tokio::task::yield_now().await;
+                }
+            }
+            Ok(self.generate_report())
+        }
+    }
+
 
 
     #[cfg(not(feature = "parallel-scan"))]
@@ -203,6 +287,7 @@ impl FileCleaner {
     }
     
     #[cfg(feature = "parallel-scan")]
+    #[allow(dead_code)]
     fn scan_path_parallel(
         &self,
         path: &Path,
@@ -236,6 +321,35 @@ impl FileCleaner {
                 }
             });
         
+        Ok(())
+    }
+
+    #[cfg(feature = "parallel-scan")]
+    fn scan_path_parallel_with_cancel(
+        &self,
+        path: &Path,
+        rule: &CategoryRule,
+        found_files: Arc<DashMap<String, CleanableFile>>,
+        seen_paths: Arc<DashMap<String, bool>>,
+        cancel: &CancellationToken,
+    ) -> Result<(), String> {
+        if !path.exists() { return Ok(()); }
+        let token = cancel.clone();
+        WalkDir::new(path)
+            .max_depth(rule.max_depth.unwrap_or(10))
+            .into_iter()
+            .par_bridge()
+            .filter_map(|e| e.ok())
+            .for_each(|entry| {
+                if token.is_cancelled() { return; }
+                let file_path = entry.path();
+                let path_str = file_path.to_string_lossy().to_string();
+                if seen_paths.contains_key(&path_str) { return; }
+                if let Some(cleanable) = self.process_entry(&entry, rule) {
+                    found_files.insert(path_str.clone(), cleanable);
+                    seen_paths.insert(path_str, true);
+                }
+            });
         Ok(())
     }
 
@@ -553,10 +667,12 @@ impl FileCleaner {
     /// Remove selected items.
     /// - We prefer moving to Trash (recoverable) and only fall back to direct removal if needed.
     /// - We allow deletion of items that appeared in the latest scan, even if marked "review".
+    #[allow(dead_code)]
     pub async fn clean_files(&self, file_paths: Vec<String>) -> Result<(u64, usize), String> {
         self.clean_files_batch(file_paths).await
     }
     
+    #[allow(dead_code)]
     pub async fn clean_files_batch(&self, file_paths: Vec<String>) -> Result<(u64, usize), String> {
         // Group files by directory for batch operations
         let mut files_by_dir: HashMap<PathBuf, Vec<String>> = HashMap::new();
@@ -608,6 +724,7 @@ impl FileCleaner {
         let mut pending_elevated: Vec<PendingElevated> = Vec::new();
 
         for path_str in files {
+            // cooperative cancellation is injected by outer wrappers
             let path = Path::new(&path_str);
 
             // Only allow deleting items that were part of the latest scan
@@ -901,6 +1018,31 @@ impl FileCleaner {
         // Invalidate cache for trash directory
         DIR_SIZE_CACHE.invalidate(&trash_dir).await;
 
+        Ok((freed, removed))
+    }
+
+    // Cancellable wrappers for cleaning and trash
+    pub async fn clean_files_with_cancel(&self, file_paths: Vec<String>, cancel: &CancellationToken) -> Result<(u64, usize), String> {
+        let mut total_freed = 0u64;
+        let mut items_removed = 0usize;
+        let mut files_by_dir: HashMap<PathBuf, Vec<String>> = HashMap::new();
+        for p in &file_paths {
+            let path = Path::new(p);
+            let parent = path.parent().unwrap_or_else(|| Path::new("/")).to_path_buf();
+            files_by_dir.entry(parent).or_insert_with(Vec::new).push(p.clone());
+        }
+        for (dir, files) in files_by_dir.into_iter() {
+            if cancel.is_cancelled() { return Err("cancelled".into()); }
+            let (f, n) = self.clean_directory_batch(dir, files).await;
+            total_freed += f; items_removed += n;
+        }
+        Ok((total_freed, items_removed))
+    }
+
+    pub async fn empty_trash_with_cancel(&self, cancel: &CancellationToken) -> Result<(u64, usize), String> {
+        if cancel.is_cancelled() { return Err("cancelled".into()); }
+        let (freed, removed) = self.empty_trash().await?;
+        if cancel.is_cancelled() { return Err("cancelled".into()); }
         Ok((freed, removed))
     }
 

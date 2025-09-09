@@ -3,6 +3,8 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use tokio::process::Command;
+use tokio_util::sync::CancellationToken;
+use tokio::select;
 
 pub(crate) struct AdminScriptOutcome {
     pub success: bool,
@@ -11,9 +13,8 @@ pub(crate) struct AdminScriptOutcome {
     pub cancelled: bool,
 }
 
-pub(crate) async fn run_deep_clean() -> AdminScriptOutcome {
-    let script_path = "/tmp/macos_optimizer_deep_clean.sh";
-    let shell_script = r#"#!/bin/bash
+fn deep_clean_script() -> &'static str {
+    r#"#!/bin/bash
 set -euo pipefail
 
 # Helper to run a step and echo a marker
@@ -43,45 +44,63 @@ run RESTART_Dock killall -KILL Dock
 run RESTART_Finder killall -KILL Finder
 run RESTART_SysUIS killall -KILL SystemUIServer
 run RESTART_cfprefsd killall cfprefsd
-"#;
+"#
+}
 
-    // Write script to disk and make it executable
-    let _ = fs::write(script_path, shell_script);
+async fn write_script(script_path: &str) {
+    let _ = fs::write(script_path, deep_clean_script());
     if let Ok(meta) = fs::metadata(script_path) {
         let mut perms = meta.permissions();
         perms.set_mode(0o755);
         let _ = fs::set_permissions(script_path, perms);
     }
+}
 
-    // Single admin prompt for the whole run
+#[allow(dead_code)]
+pub(crate) async fn run_deep_clean() -> AdminScriptOutcome {
+    let script_path = "/tmp/macos_optimizer_deep_clean.sh";
+    write_script(script_path).await;
     let applescript = format!(r#"with timeout of 1200 seconds
   do shell script "{}" with administrator privileges
 end timeout"#, script_path);
 
     let result = Command::new("osascript").arg("-e").arg(applescript).output().await;
-
-    // Always attempt cleanup of the temp script
     let _ = fs::remove_file(script_path);
-
     match result {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let cancelled = stderr.contains("canceled") || stderr.contains("cancelled") || stderr.contains("-128");
-            AdminScriptOutcome {
-                success: output.status.success(),
-                stdout,
-                stderr,
-                cancelled,
-            }
+            AdminScriptOutcome { success: output.status.success(), stdout, stderr, cancelled }
         }
-        Err(e) => {
-            AdminScriptOutcome {
-                success: false,
-                stdout: String::new(),
-                stderr: format!("Failed to run admin script: {}", e),
-                cancelled: false,
-            }
-        }
+        Err(e) => AdminScriptOutcome { success: false, stdout: String::new(), stderr: format!("Failed to run admin script: {}", e), cancelled: false }
     }
+}
+
+pub(crate) async fn run_deep_clean_with_cancel(cancel: &CancellationToken) -> AdminScriptOutcome {
+    let script_path = "/tmp/macos_optimizer_deep_clean.sh";
+    write_script(script_path).await;
+    let applescript = format!(r#"with timeout of 1200 seconds
+  do shell script "{}" with administrator privileges
+end timeout"#, script_path);
+    let mut child = match Command::new("osascript").arg("-e").arg(applescript).spawn() { Ok(c) => c, Err(e) => {
+        let _ = fs::remove_file(script_path);
+        return AdminScriptOutcome { success: false, stdout: String::new(), stderr: format!("Failed to spawn admin script: {}", e), cancelled: false };
+    }};
+
+    let outcome = select! {
+        status = child.wait() => {
+            let _ = fs::remove_file(script_path);
+            match status {
+                Ok(st) => AdminScriptOutcome { success: st.success(), stdout: String::new(), stderr: String::new(), cancelled: false },
+                Err(e) => AdminScriptOutcome { success: false, stdout: String::new(), stderr: format!("Failed to wait admin script: {}", e), cancelled: false }
+            }
+        }
+        _ = cancel.cancelled() => {
+            let _ = child.kill().await;
+            let _ = fs::remove_file(script_path);
+            AdminScriptOutcome { success: false, stdout: String::new(), stderr: String::new(), cancelled: true }
+        }
+    };
+    outcome
 }
