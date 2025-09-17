@@ -357,13 +357,16 @@ async function scanForCleanableFiles() {
             cleanButton.disabled = true;
             
             try {
-                const report = await invoke('scan_cleanable_files');
-                lastReport = report;
-                cleanableFiles = await invoke('get_cleanable_files');
+                const report = await invoke('scan_cleanable_files_enhanced');
+                lastReport = report.base || report;
+                const enhanced = (report.enhanced_files || []).map(f => f.base);
+                cleanableFiles = enhanced && enhanced.length > 0 ? enhanced : await invoke('get_cleanable_files');
                 
-                // Update summary
-                document.getElementById('total-cleanable').textContent = formatBytes(report.total_size);
-                document.getElementById('files-found').textContent = report.files_count;
+                // Update summary (prefer base fields from enhanced scan)
+                const totalSize = (report && report.base && typeof report.base.total_size === 'number') ? report.base.total_size : (report && typeof report.total_size === 'number') ? report.total_size : 0;
+                const filesCount = (report && report.base && typeof report.base.files_count === 'number') ? report.base.files_count : (report && typeof report.files_count === 'number') ? report.files_count : 0;
+                document.getElementById('total-cleanable').textContent = formatBytes(totalSize);
+                document.getElementById('files-found').textContent = filesCount;
                 
                 // Display categories
                 renderCategories();
@@ -376,7 +379,7 @@ async function scanForCleanableFiles() {
                 cleaningReport.style.display = 'block';
                 cleanButton.disabled = false;
                 
-                showNotification(`Found ${report.files_count} cleanable files (${formatBytes(report.total_size)})`, 'success');
+                showNotification(`Found ${filesCount} cleanable files (${formatBytes(totalSize)})`, 'success');
                 return report;
             } catch (error) {
                 console.error('Error scanning files:', error);
@@ -549,7 +552,9 @@ async function cleanCategory(categoryName) {
     if (!confirmed) return;
 
     try {
-        const [freedBytes, filesDeleted] = await invoke('clean_files', { filePaths: files.map(f => f.path) });
+        const result = await invoke('clean_files_enhanced', { filePaths: files.map(f => f.path) });
+        const freedBytes = result.total_freed || 0;
+        const filesDeleted = result.deleted_count || 0;
         showNotification(`Cleaned ${filesDeleted} files, freed ${formatBytes(freedBytes)}`, 'success');
         await scanForCleanableFiles();
         // Reset category filter
@@ -582,10 +587,31 @@ async function cleanSelectedFiles() {
         return;
     }
     
-    const confirmed = await userConfirm(
-        `Are you sure you want to delete ${selectedFiles.length} files?\n\nThis will free approximately ${formatBytes(totalSize)}`,
-        { title: 'Confirm Clean', kind: 'warning' }
-    );
+    // Pre-validate with enhanced pipeline to surface warnings/errors
+    let confirmMessage = `Are you sure you want to delete ${selectedFiles.length} files?\n\nThis will free approximately ${formatBytes(totalSize)}`;
+    try {
+        const prep = await invoke('prepare_deletion_enhanced', { filePaths: selectedFiles });
+        if (prep && prep.validation_result) {
+            const warnings = (prep.validation_result.warnings || []).slice(0, 5);
+            const errors = (prep.validation_result.errors || []).slice(0, 5);
+            if (errors.length > 0) {
+                confirmMessage += `\n\nBlocked (${errors.length}):`;
+                errors.forEach(e => {
+                    confirmMessage += `\n• ${e.message}`;
+                });
+            }
+            if (warnings.length > 0) {
+                confirmMessage += `\n\nWarnings (${warnings.length}):`;
+                warnings.forEach(w => {
+                    confirmMessage += `\n• ${w.message}`;
+                });
+            }
+        }
+    } catch (e) {
+        console.warn('Enhanced pre-validation failed, proceeding with confirmation only', e);
+    }
+
+    const confirmed = await userConfirm(confirmMessage, { title: 'Confirm Clean', kind: 'warning' });
     if (!confirmed) {
         console.log('User cancelled file cleaning');
         return;
@@ -595,7 +621,9 @@ async function cleanSelectedFiles() {
     
     try {
         showNotification('Cleaning selected files...', 'success');
-        const [freedBytes, filesDeleted] = await invoke('clean_files', { filePaths: selectedFiles });
+        const result = await invoke('clean_files_enhanced', { filePaths: selectedFiles });
+        const freedBytes = result.total_freed || 0;
+        const filesDeleted = result.deleted_count || 0;
         console.log(`Clean complete: ${filesDeleted} files deleted, ${freedBytes} bytes freed`);
         showNotification(`Cleaned ${filesDeleted} files, freed ${formatBytes(freedBytes)}`, 'success');
         
@@ -947,6 +975,24 @@ function setupEventListeners() {
             } catch (e) {
                 console.error('Empty trash failed:', e);
                 showNotification('Failed to empty Trash', 'error');
+            }
+        });
+    }
+
+    // Basic restore from Trash action (restores selected file names into Downloads)
+    const restoreBtn = document.getElementById('restore-from-trash');
+    if (restoreBtn) {
+        restoreBtn.addEventListener('click', async () => {
+            const namesInput = prompt('Enter exact Trash item names to restore (comma-separated).');
+            if (!namesInput) return;
+            const names = namesInput.split(',').map(s => s.trim()).filter(Boolean);
+            if (names.length === 0) return;
+            try {
+                const restored = await invoke('restore_from_trash', { fileNames: names });
+                showNotification(`Restored ${restored} item(s) to Downloads`, 'success');
+            } catch (e) {
+                console.error('Restore from Trash failed:', e);
+                showNotification('Failed to restore items from Trash', 'error');
             }
         });
     }
