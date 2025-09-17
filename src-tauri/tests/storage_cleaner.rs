@@ -191,13 +191,39 @@ async fn empty_trash_removes_items() {
     let trash_before = fs::read_dir(env.trash_dir()).expect("read trash").count();
     assert!(trash_before >= 1);
 
+    let trash_dir = env.trash_dir();
+    let reported_size_before = cleaner
+        .get_directory_size_async(&trash_dir)
+        .await
+        .expect("size before");
+    assert!(
+        reported_size_before >= 4096,
+        "trash should report at least original file size"
+    );
+
     let (freed, removed) = cleaner
         .empty_trash_with_cancel(&token)
         .await
         .expect("empty trash should succeed");
 
-    assert!(freed >= 4096, "should free at least file size");
-    assert!(removed >= 1, "should remove at least one entry");
-    let trash_after = fs::read_dir(env.trash_dir()).expect("read trash").count();
+    assert_eq!(
+        freed, reported_size_before,
+        "freed bytes should match trash size"
+    );
+    assert_eq!(
+        removed, trash_before,
+        "removed count should match trash entries"
+    );
+
+    let reported_size_after = cleaner
+        .get_directory_size_async(&trash_dir)
+        .await
+        .expect("size after");
+    assert_eq!(
+        reported_size_after, 0,
+        "trash directory should report empty size"
+    );
+
+    let trash_after = fs::read_dir(&trash_dir).expect("read trash").count();
     assert_eq!(trash_after, 0, "trash should be empty");
 }

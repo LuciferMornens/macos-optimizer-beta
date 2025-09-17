@@ -168,8 +168,10 @@ impl DynamicRuleEngine {
 }
 
 /// Validates rule consistency and provides a dry-run preview report.
+#[cfg_attr(not(feature = "app"), allow(dead_code))]
 pub struct RuleValidator;
 
+#[cfg_attr(not(feature = "app"), allow(dead_code))]
 impl RuleValidator {
     pub fn new() -> Self {
         Self

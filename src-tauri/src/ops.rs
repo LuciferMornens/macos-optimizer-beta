@@ -1,12 +1,19 @@
+#[cfg(feature = "app")]
 use dashmap::DashMap;
+#[cfg(feature = "app")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "app")]
 use std::sync::Arc;
 use std::time::Instant;
+#[cfg(feature = "app")]
 use tokio::sync::Semaphore;
+#[cfg(feature = "app")]
 use tokio_util::sync::CancellationToken;
 
+#[cfg(feature = "app")]
 pub type OperationId = String;
 
+#[cfg(feature = "app")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum OperationStatus {
     Pending,
@@ -16,6 +23,7 @@ pub enum OperationStatus {
     Failed,
 }
 
+#[cfg(feature = "app")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationKind {
@@ -27,6 +35,7 @@ pub enum OperationKind {
     DashboardRefresh,
 }
 
+#[cfg(feature = "app")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpState {
     pub id: OperationId,
@@ -40,12 +49,14 @@ pub struct OpState {
     pub status: OperationStatus,
 }
 
+#[cfg(feature = "app")]
 #[derive(Debug)]
 pub struct OpHandle {
     pub token: CancellationToken,
     pub _started_at: Instant,
 }
 
+#[cfg(feature = "app")]
 #[derive(Clone)]
 pub struct OperationRegistry {
     inner: Arc<DashMap<OperationId, (OpState, Arc<OpHandle>)>>,
@@ -55,6 +66,7 @@ pub struct OperationRegistry {
     pub opt_sem: Arc<Semaphore>,
 }
 
+#[cfg(feature = "app")]
 impl OperationRegistry {
     pub fn new(scan_permits: usize, clean_permits: usize, opt_permits: usize) -> Self {
         Self {
@@ -136,6 +148,7 @@ impl OperationRegistry {
     }
 }
 
+#[cfg(feature = "app")]
 fn now_ms() -> u128 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()

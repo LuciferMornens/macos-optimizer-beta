@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "dev": "OS_ACTIVITY_MODE=disable tauri dev",
-    "build": "tauri build"
+    "dev": "OS_ACTIVITY_MODE=disable tauri dev --features app",
+    "build": "tauri build --features app"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

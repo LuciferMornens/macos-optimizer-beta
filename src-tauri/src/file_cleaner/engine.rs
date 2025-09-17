@@ -951,6 +951,9 @@ impl FileCleaner {
         // Wait a moment for operations to complete
         sleep(Duration::from_millis(500)).await;
 
+        // Ensure cached directory sizes reflect the latest state before measuring again
+        DIR_SIZE_CACHE.invalidate(&trash_dir).await;
+
         // Calculate freed space
         let size_after = self.get_directory_size_async(&trash_dir).await.unwrap_or(0);
         let count_after = fs::read_dir(&trash_dir)
@@ -959,9 +962,6 @@ impl FileCleaner {
 
         let freed = size_before.saturating_sub(size_after);
         let removed = count_before.saturating_sub(count_after);
-
-        // Invalidate cache for trash directory
-        DIR_SIZE_CACHE.invalidate(&trash_dir).await;
 
         Ok((freed, removed))
     }
