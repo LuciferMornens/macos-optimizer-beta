@@ -5,7 +5,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use sysinfo::System;
 use tokio::process::Command;
+use tokio::time::{timeout, Duration};
 
+use super::dependency_checker::DependencyChecker;
 use super::types::CleanableFile;
 
 /// Pre-deletion validation system
@@ -164,6 +166,11 @@ impl FileLockChecker {
         if self.lsof_available {
             for file in files {
                 let path = PathBuf::from(&file.path);
+                if let Ok(metadata) = fs::metadata(&path) {
+                    if metadata.is_dir() {
+                        continue;
+                    }
+                }
                 if self.is_file_open(&path).await {
                     open_files.push(path);
                 }
@@ -189,11 +196,20 @@ impl FileLockChecker {
             return false;
         }
 
-        let output = Command::new("lsof").arg(path).output().await;
+        let mut command = Command::new("lsof");
+        command.arg(path);
+        command.kill_on_drop(true);
 
-        match output {
-            Ok(output) => !output.stdout.is_empty(),
-            Err(_) => false,
+        match timeout(Duration::from_secs(5), command.output()).await {
+            Ok(Ok(output)) => !output.stdout.is_empty(),
+            Ok(Err(err)) => {
+                log::warn!("lsof check failed for {}: {}", path.display(), err);
+                false
+            }
+            Err(_) => {
+                log::warn!("lsof timed out for {}", path.display());
+                false
+            }
         }
     }
 
@@ -201,78 +217,6 @@ impl FileLockChecker {
         // Simplified check - in production would need more sophisticated checking
         // Using lsof is more reliable
         false
-    }
-}
-
-/// Checks for file dependencies
-pub struct DependencyChecker {}
-
-impl DependencyChecker {
-    pub fn new() -> Self {
-        Self {}
-    }
-
-    pub async fn verify_no_dependencies(
-        &self,
-        files: &[CleanableFile],
-    ) -> HashMap<PathBuf, Vec<PathBuf>> {
-        let mut dependencies = HashMap::new();
-
-        for file in files {
-            let path = PathBuf::from(&file.path);
-            let deps = self.find_dependencies(&path).await;
-            if !deps.is_empty() {
-                dependencies.insert(path, deps);
-            }
-        }
-
-        dependencies
-    }
-
-    async fn find_dependencies(&self, path: &Path) -> Vec<PathBuf> {
-        let mut deps = Vec::new();
-
-        // Check for symbolic links pointing to this file
-        if let Ok(output) = Command::new("find")
-            .arg("/")
-            .arg("-type")
-            .arg("l")
-            .arg("-lname")
-            .arg(path)
-            .arg("-print")
-            .arg("-quit")
-            .output()
-            .await
-        {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                if !line.is_empty() {
-                    deps.push(PathBuf::from(line));
-                }
-            }
-        }
-
-        // Check for plist files referencing this path
-        let path_str = path.to_string_lossy();
-        if let Ok(output) = Command::new("grep")
-            .arg("-r")
-            .arg(&*path_str)
-            .arg("/Library/LaunchAgents")
-            .arg("/Library/LaunchDaemons")
-            .arg("~/Library/LaunchAgents")
-            .output()
-            .await
-        {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                if let Some(colon_pos) = line.find(':') {
-                    let plist_path = &line[..colon_pos];
-                    deps.push(PathBuf::from(plist_path));
-                }
-            }
-        }
-
-        deps
     }
 }
 

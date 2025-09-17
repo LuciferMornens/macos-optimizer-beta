@@ -7,196 +7,129 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
-    padding: var(--space-lg);
+    padding: 24px;
     box-shadow: var(--shadow-sm);
-    position: relative;
-    overflow: hidden;
-    transition: all var(--transition-base);
-}
-
-/* Elegant textured background for cards */
-.card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: var(--gradient-radial);
-    opacity: 0.5;
-    pointer-events: none;
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast), border var(--transition-fast);
 }
 
 .card:hover {
-    transform: translateY(-4px);
-    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
     border-color: var(--border-default);
+    box-shadow: var(--shadow-md);
 }
 
-/* Card with dots pattern */
-.card-textured {
-    background-image: var(--texture-dots);
-    background-size: 20px 20px;
-    background-position: 0 0, 10px 10px;
-}
-
-/* Stat Card */
 .stat-card {
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
-    padding: var(--space-lg);
-    position: relative;
-    overflow: hidden;
-    transition: all var(--transition-base);
-}
-
-.stat-card::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: 4px;
-    background: var(--gradient-strong);
-    transform: scaleX(0);
-    transform-origin: left;
-    transition: transform var(--transition-base);
-}
-
-.stat-card:hover::after {
-    transform: scaleX(1);
+    padding: 26px;
+    box-shadow: var(--shadow-sm);
+    display: grid;
+    gap: 12px;
 }
 
 .stat-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: var(--space-md);
-}
-
-.stat-label {
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     color: var(--text-tertiary);
-}
-
-.stat-icon {
-    font-size: 1.25rem;
-    color: var(--text-secondary);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 
 .stat-value {
-    font-size: 2rem;
+    font-size: clamp(2rem, 3vw, 2.6rem);
     font-weight: 700;
-    margin-bottom: var(--space-sm);
-    font-variant-numeric: tabular-nums;
-    background: var(--gradient-strong);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
 }
 
 .stat-detail {
-    font-size: 0.875rem;
+    font-size: 0.85rem;
     color: var(--text-secondary);
-    margin-bottom: var(--space-md);
 }
 
-/* Category Card */
 .category-card {
     background: var(--bg-elevated);
-    border: 2px solid var(--border-subtle);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    padding: var(--space-md);
+    padding: 18px 20px;
+    display: grid;
+    gap: 10px;
+    transition: border var(--transition-base), transform var(--transition-base), box-shadow var(--transition-base);
     cursor: pointer;
-    transition: all var(--transition-base);
-    position: relative;
 }
 
-.category-card::before {
-    content: '';
-    position: absolute;
-    inset: -2px;
-    border-radius: var(--radius-md);
-    padding: 2px;
-    background: var(--gradient-strong);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    opacity: 0;
-    transition: opacity var(--transition-base);
-}
-
-.category-card:hover::before,
-.category-card.selected::before {
-    opacity: 1;
+.category-card:hover {
+    border-color: var(--border-default);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
 }
 
 .category-card.selected {
-    background: var(--gray-900);
-    color: var(--pure-white);
-    border-color: transparent;
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-md);
 }
 
 .category-card--risky {
-    border-color: rgba(255, 214, 10, 0.35);
-    background: rgba(255, 214, 10, 0.06);
+    border-style: dashed;
+    border-color: rgba(17, 17, 17, 0.35);
+    background: rgba(17, 17, 17, 0.04);
 }
 
 .category-card--risky.selected {
-    background: rgba(255, 214, 10, 0.16);
-    color: var(--text-primary);
+    background: rgba(17, 17, 17, 0.08);
 }
 
 .category-card--empty {
-    opacity: 0.6;
+    opacity: 0.45;
     cursor: default;
-    pointer-events: none;
+    box-shadow: none;
 }
 
 .category-name {
-    font-weight: 600;
-    margin-bottom: var(--space-xs);
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
-    flex-wrap: wrap;
+    gap: 8px;
+    font-weight: 600;
+    color: var(--text-primary);
 }
 
 .category-badges {
     display: inline-flex;
-    align-items: center;
     gap: 6px;
 }
 
 .category-size {
-    font-size: 0.875rem;
-    opacity: 0.8;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
 }
 
-/* File Item Card */
 .file-item {
-    display: flex;
+    display: grid;
+    grid-template-columns: 20px 1fr auto;
     align-items: center;
-    padding: var(--space-md);
-    background: var(--bg-elevated);
+    gap: 16px;
+    padding: 16px 18px;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    margin-bottom: var(--space-sm);
-    transition: all var(--transition-fast);
+    background: var(--bg-elevated);
+    transition: border var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+}
+
+.file-item:hover {
+    border-color: var(--border-default);
+    background: var(--bg-secondary);
 }
 
 .file-item--risky {
-    border-color: rgba(255, 214, 10, 0.35);
-    background: rgba(255, 214, 10, 0.06);
+    border-style: dashed;
 }
 
 .file-item--risky-enabled {
-    border-color: rgba(255, 69, 58, 0.35);
-    background: rgba(255, 69, 58, 0.08);
+    border-color: rgba(17, 17, 17, 0.4);
+    background: rgba(17, 17, 17, 0.06);
 }
 
 .file-item:hover {

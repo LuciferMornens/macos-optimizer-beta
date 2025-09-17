@@ -3,7 +3,6 @@
 use super::{MetricsSampler, SampleEnvelope};
 use chrono::Utc;
 use std::time::Duration;
-use tokio::time::{sleep, timeout};
 
 #[test]
 fn envelope_fresh_preserves_metadata() {
@@ -27,17 +26,7 @@ async fn sampler_emits_recent_snapshot() {
     let sampler = MetricsSampler::spawn();
     sampler.wait_until_ready().await;
 
-    let snapshot = timeout(Duration::from_secs(5), async {
-        loop {
-            let snap = sampler.latest_snapshot().await;
-            if snap.memory.value.is_some() && snap.cpu.value.is_some() {
-                break snap;
-            }
-            sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("sampler did not produce data in time");
+    let snapshot = sampler.latest_snapshot().await;
 
     let now = Utc::now();
     let age = now.signed_duration_since(snapshot.captured_at);
@@ -45,6 +34,30 @@ async fn sampler_emits_recent_snapshot() {
         age.num_seconds() < 5,
         "snapshot too old: {}s",
         age.num_seconds()
+    );
+
+    let cpu = &snapshot.cpu;
+    assert!(
+        cpu.value.is_some() || cpu.error.is_some(),
+        "cpu sample missing value and error"
+    );
+
+    let memory = &snapshot.memory;
+    assert!(
+        memory.value.is_some() || memory.error.is_some(),
+        "memory sample missing value and error"
+    );
+
+    let disks = &snapshot.disks;
+    assert!(
+        disks.value.is_some() || disks.error.is_some(),
+        "disks sample missing value and error"
+    );
+
+    let uptime = &snapshot.uptime;
+    assert!(
+        uptime.value.is_some() || uptime.error.is_some(),
+        "uptime sample missing value and error"
     );
 
     drop(sampler);

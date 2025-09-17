@@ -22,37 +22,8 @@ body {
     background: var(--bg-primary);
     color: var(--text-primary);
     line-height: 1.6;
-    height: 100vh;
+    min-height: 100vh;
     overflow: hidden;
-    position: relative;
-}
-
-/* Elegant background texture */
-body::before {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-image: var(--texture-grain);
-    background-size: 256px 256px;
-    pointer-events: none;
-    opacity: 1;
-    z-index: -1;
-}
-
-/* Subtle gradient mesh background */
-body::after {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: var(--gradient-mesh);
-    pointer-events: none;
-    z-index: -2;
 }
 
 /* Reset common elements */
@@ -92,40 +63,38 @@ button {
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-    background: var(--bg-secondary);
-    border-radius: var(--radius-sm);
+    background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: var(--gray-400);
-    border-radius: var(--radius-sm);
-    border: 2px solid var(--bg-secondary);
+    background: rgba(17, 17, 17, 0.2);
+    border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: var(--gray-500);
+    background: rgba(17, 17, 17, 0.35);
 }
 
 /* Focus styles */
 :focus-visible {
-    outline: 2px solid var(--accent-primary);
-    outline-offset: 2px;
+    outline: 2px solid rgba(17, 17, 17, 0.45);
+    outline-offset: 3px;
 }
 
 /* Selection styles */
 ::selection {
-    background: var(--gray-900);
+    background: var(--accent-primary);
     color: var(--pure-white);
 }
 
 @media (prefers-color-scheme: dark) {
     ::selection {
-        background: var(--gray-100);
-        color: var(--gray-900);
+        background: var(--pure-white);
+        color: var(--pure-black);
     }
 }

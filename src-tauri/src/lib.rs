@@ -6,8 +6,8 @@ mod ops;
 mod system_info;
 
 use file_cleaner::{
-    CleanableFile, CleaningReport, EnhancedCleaningReport, EnhancedFileCleaner, FileCleaner,
-    UserAction,
+    CleanableFile, CleaningReport, EnhancedCleaningReport, EnhancedDeletionProgress,
+    EnhancedFileCleaner, FileCleaner, UserAction,
 };
 use memory_optimizer::{MemoryOptimizationResult, MemoryOptimizer};
 use metrics::MemoryStats;
@@ -19,6 +19,11 @@ use ops::{OperationKind, OperationRegistry, ThroughputTracker};
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 use tokio::sync::RwLock;
+
+pub use file_cleaner::{
+    CleanableFile as StorageCleanableFile, CleaningReport as StorageCleaningReport,
+    FileCleaner as StorageFileCleaner,
+};
 
 // Progress event types for real-time operation feedback
 #[derive(Clone, Serialize)]
@@ -491,27 +496,80 @@ async fn clean_files_enhanced(
         )
         .ok();
 
-    let mut cleaner = state.enhanced_file_cleaner.write().await;
     let allow_low_safety = allow_low_safety.unwrap_or(false);
+
+    let ops_registry = state.ops.clone();
+    let op_id_for_cb = operation_id.clone();
+    let app_for_cb = app_handle.clone();
+    let progress_cb = move |update: EnhancedDeletionProgress| {
+        ops_registry.update(op_id_for_cb.as_str(), |state| {
+            state.progress = update.progress;
+            state.stage = update.stage.to_string();
+            state.details = Some(update.message.clone());
+            state.eta_ms = update.eta_ms;
+        });
+
+        let throughput_payload = if update.files_per_s.is_some() || update.mb_per_s.is_some() {
+            Some(Throughput {
+                files_per_s: update.files_per_s,
+                mb_per_s: update.mb_per_s,
+            })
+        } else {
+            None
+        };
+
+        let _ = app_for_cb.emit(
+            "progress:update",
+            ProgressEvent {
+                operation_id: op_id_for_cb.clone(),
+                progress: update.progress,
+                message: update.message.clone(),
+                stage: update.stage.to_string(),
+                can_cancel: true,
+                eta_ms: update.eta_ms,
+                throughput: throughput_payload,
+            },
+        );
+    };
+
+    let mut cleaner = state.enhanced_file_cleaner.write().await;
 
     // Use enhanced cleaning with validation and recovery
     let result = cleaner
-        .clean_files_enhanced(file_paths, Some(&token), allow_low_safety)
+        .clean_files_enhanced(
+            file_paths,
+            Some(&token),
+            allow_low_safety,
+            Some(&progress_cb),
+        )
         .await;
 
     match &result {
         Ok(cleaning_result) => {
+            let mut completion_message = format!(
+                "Enhanced cleaning completed: {} files deleted, {} MB freed",
+                cleaning_result.deleted_count,
+                cleaning_result.total_freed / (1024 * 1024)
+            );
+            if cleaning_result.failed_count > 0 {
+                completion_message.push_str(&format!(
+                    " ({} item{} skipped by safety checks)",
+                    cleaning_result.failed_count,
+                    if cleaning_result.failed_count == 1 {
+                        ""
+                    } else {
+                        "s"
+                    }
+                ));
+            }
+
             app_handle
                 .emit(
                     "operation:complete",
                     OperationCompleteEvent {
                         operation_id: operation_id.clone(),
                         success: true,
-                        message: format!(
-                            "Enhanced cleaning completed: {} files deleted, {} MB freed",
-                            cleaning_result.deleted_count,
-                            cleaning_result.total_freed / (1024 * 1024)
-                        ),
+                        message: completion_message,
                         duration: 0,
                         canceled: Some(false),
                     },

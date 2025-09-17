@@ -39,6 +39,14 @@ html {
     scroll-behavior: smooth;
 }
 
+:root {
+    color-scheme: light dark;
+}
+
+body {
+    background: var(--bg-primary);
+}
+
 /* Utility Classes */
 .hidden {
     display: none !important;

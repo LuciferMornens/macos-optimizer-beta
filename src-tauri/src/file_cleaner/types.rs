@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json;
+use std::env;
+use std::fs;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CleanableFile {
@@ -50,10 +52,19 @@ pub(crate) struct CategoryRule {
     pub(crate) require_subpaths: Option<Vec<String>>,
 }
 
+const DEFAULT_RULES_JSON: &str = include_str!("../../rules/cleaner_rules.json");
+
 // Load rules with error propagation (for scan_system)
 pub fn load_rules_result() -> Result<CleanerRules, String> {
-    let raw = include_str!("../../rules/cleaner_rules.json");
-    serde_json::from_str(raw).map_err(|e| format!("Failed to parse cleaner rules: {}", e))
+    if let Ok(path) = env::var("MACOS_OPTIMIZER_RULES_OVERRIDE") {
+        let data = fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read cleaner rules override ({}): {}", path, e))?;
+        return serde_json::from_str(&data)
+            .map_err(|e| format!("Failed to parse cleaner rules override ({}): {}", path, e));
+    }
+
+    serde_json::from_str(DEFAULT_RULES_JSON)
+        .map_err(|e| format!("Failed to parse cleaner rules: {}", e))
 }
 
 // Load rules with default fallback (for reporting)

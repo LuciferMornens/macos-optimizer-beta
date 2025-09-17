@@ -2,6 +2,7 @@
 use dashmap::DashMap;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -204,6 +205,45 @@ impl FileCleaner {
         }
 
         Ok(())
+    }
+
+    #[cfg(feature = "parallel-scan")]
+    pub(crate) fn collect_rule_matches_for_path(
+        &self,
+        path: &Path,
+        rule: &CategoryRule,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<CleanableFile>, String> {
+        let found_files = Arc::new(DashMap::new());
+        let seen_paths = Arc::new(DashMap::new());
+        self.scan_path_parallel_with_cancel(path, rule, found_files.clone(), seen_paths, cancel)?;
+        let results = found_files
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect();
+        Ok(results)
+    }
+
+    #[cfg(not(feature = "parallel-scan"))]
+    pub(crate) fn collect_rule_matches_for_path(
+        &self,
+        path: &Path,
+        rule: &CategoryRule,
+        _cancel: &CancellationToken,
+    ) -> Result<Vec<CleanableFile>, String> {
+        let mut found_files = Vec::new();
+        let mut local_seen_paths = HashSet::new();
+        let mut local_seen_dirs = Vec::new();
+
+        self.scan_path_internal(
+            path,
+            rule,
+            &mut found_files,
+            &mut local_seen_paths,
+            &mut local_seen_dirs,
+        )?;
+
+        Ok(found_files)
     }
 
     // The remaining parallel implementation is the cancellable variant below.
@@ -777,22 +817,34 @@ impl FileCleaner {
     /// 2) Fallback: rename into ~/.Trash with a unique name.
     async fn move_to_trash(&self, path: &Path) -> Result<(), String> {
         // Try Finder first
-        let path_str = path.to_string_lossy();
-        let escaped = path_str.replace("\\", "\\\\").replace("\"", "\\\"");
-        let script = format!(
-            "tell application \"Finder\" to move POSIX file \"{}\" to trash",
-            escaped
-        );
+        if !is_osascript_disabled() {
+            let path_str = path.to_string_lossy();
+            let escaped = path_str.replace("\\", "\\\\").replace("\"", "\\\"");
+            let script = format!(
+                "tell application \"Finder\" to move POSIX file \"{}\" to trash",
+                escaped
+            );
 
-        let applescript_output = Command::new("osascript")
-            .arg("-e")
-            .arg(script)
-            .output()
-            .await
-            .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
-
-        if applescript_output.status.success() {
-            return Ok(());
+            match Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .output()
+                .await
+            {
+                Ok(output) if output.status.success() => {
+                    return Ok(());
+                }
+                Ok(output) => {
+                    log::warn!(
+                        "Finder trash command failed (status {:?}): {}",
+                        output.status.code(),
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                Err(err) => {
+                    log::warn!("Failed to execute AppleScript for trash move: {}", err);
+                }
+            }
         }
 
         // Fallback: rename into ~/.Trash with a unique name
@@ -848,16 +900,31 @@ impl FileCleaner {
             .unwrap_or(0);
 
         // First attempt: Use AppleScript to empty trash properly through Finder
-        let script = "tell application \"Finder\" to empty trash";
+        let mut emptied_via_finder = false;
+        if !is_osascript_disabled() {
+            match Command::new("osascript")
+                .arg("-e")
+                .arg("tell application \"Finder\" to empty trash")
+                .output()
+                .await
+            {
+                Ok(output) if output.status.success() => {
+                    emptied_via_finder = true;
+                }
+                Ok(output) => {
+                    log::warn!(
+                        "Finder empty trash failed (status {:?}): {}",
+                        output.status.code(),
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                Err(err) => {
+                    log::warn!("Failed to execute Finder empty trash AppleScript: {}", err);
+                }
+            }
+        }
 
-        let applescript_output = Command::new("osascript")
-            .arg("-e")
-            .arg(script)
-            .output()
-            .await
-            .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
-
-        if !applescript_output.status.success() {
+        if !emptied_via_finder {
             // If AppleScript fails, try removing contents manually
             if let Ok(entries) = fs::read_dir(&trash_dir) {
                 for entry in entries.flatten() {
@@ -1009,4 +1076,13 @@ fn split_name_ext(name: &str) -> (String, String) {
     } else {
         (name.to_string(), String::new())
     }
+}
+
+fn is_osascript_disabled() -> bool {
+    env::var("MACOS_OPTIMIZER_DISABLE_OSA")
+        .map(|value| {
+            let lowercase = value.trim().to_ascii_lowercase();
+            lowercase == "1" || lowercase == "true" || lowercase == "yes"
+        })
+        .unwrap_or(false)
 }

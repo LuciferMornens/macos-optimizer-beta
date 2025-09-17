@@ -1,8 +1,9 @@
+use super::process_snapshot::ProcessSnapshot;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use sysinfo::System;
 
 /// Smart cache detection with validation
@@ -76,7 +77,12 @@ impl SmartCacheDetector {
         }
     }
 
-    pub async fn validate_cache_file(&self, path: &Path, category: &str) -> CacheValidation {
+    pub async fn validate_cache_file(
+        &self,
+        path: &Path,
+        _category: &str,
+        process_snapshot: &ProcessSnapshot,
+    ) -> CacheValidation {
         let mut validation = CacheValidation {
             is_valid_cache: false,
             confidence: 0.0,
@@ -120,8 +126,7 @@ impl SmartCacheDetector {
         // Check if associated app is active
         validation.active_app = self
             .app_activity_checker
-            .is_app_active(path, category)
-            .await;
+            .is_app_active(path, process_snapshot);
 
         // Adjust importance based on comprehensive analysis
         validation.importance = self.classify_cache_importance(path, &validation);
@@ -252,20 +257,16 @@ impl AppActivityChecker {
         Self { app_process_map }
     }
 
-    pub async fn is_app_active(&self, path: &Path, _category: &str) -> bool {
+    pub fn is_app_active(&self, path: &Path, snapshot: &ProcessSnapshot) -> bool {
         let path_str = path.to_string_lossy().to_lowercase();
 
-        // Create new system instance for checking
-        let mut system = System::new_all();
-        system.refresh_processes();
-
-        // Check for app-specific processes
         for (app_key, process_names) in &self.app_process_map {
             if path_str.contains(app_key) {
-                for expected_name in process_names {
-                    if system.processes_by_name(expected_name).count() > 0 {
-                        return true;
-                    }
+                if process_names
+                    .iter()
+                    .any(|name| snapshot.has_process_named(name))
+                {
+                    return true;
                 }
             }
         }
@@ -388,127 +389,4 @@ impl CacheSignature {
         }
         false
     }
-}
-
-/// Detects and validates duplicate files
-pub struct DuplicateDetector {
-    hash_cache: HashMap<PathBuf, String>,
-}
-
-impl DuplicateDetector {
-    pub fn new() -> Self {
-        Self {
-            hash_cache: HashMap::new(),
-        }
-    }
-
-    pub async fn find_duplicates(&mut self, paths: &[PathBuf]) -> Vec<DuplicateGroup> {
-        let mut hash_map: HashMap<String, Vec<PathBuf>> = HashMap::new();
-
-        for path in paths {
-            if let Ok(hash) = self.calculate_file_hash(path).await {
-                hash_map
-                    .entry(hash)
-                    .or_insert_with(Vec::new)
-                    .push(path.clone());
-            }
-        }
-
-        // Group duplicates
-        let mut duplicate_groups = Vec::new();
-        for (hash, files) in hash_map {
-            if files.len() > 1 {
-                let total_size = self.calculate_total_size(&files);
-                let recommended_to_keep = self.determine_original(&files);
-                duplicate_groups.push(DuplicateGroup {
-                    hash,
-                    files,
-                    total_size,
-                    recommended_to_keep,
-                });
-            }
-        }
-
-        duplicate_groups
-    }
-
-    async fn calculate_file_hash(&mut self, path: &Path) -> Result<String, std::io::Error> {
-        // Check cache first
-        if let Some(hash) = self.hash_cache.get(path) {
-            return Ok(hash.clone());
-        }
-
-        use sha2::{Digest, Sha256};
-        use std::io::Read;
-
-        let mut file = fs::File::open(path)?;
-        let mut hasher = Sha256::new();
-        let mut buffer = vec![0u8; 8192];
-
-        loop {
-            let bytes_read = file.read(&mut buffer)?;
-            if bytes_read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..bytes_read]);
-        }
-
-        let hash = format!("{:x}", hasher.finalize());
-        self.hash_cache.insert(path.to_path_buf(), hash.clone());
-        Ok(hash)
-    }
-
-    fn calculate_total_size(&self, files: &[PathBuf]) -> u64 {
-        files
-            .iter()
-            .filter_map(|f| fs::metadata(f).ok())
-            .map(|m| m.len())
-            .sum()
-    }
-
-    fn determine_original(&self, files: &[PathBuf]) -> Option<PathBuf> {
-        // Prefer files in original locations over caches/downloads
-        let mut candidates: Vec<(PathBuf, i32)> = Vec::new();
-
-        for file in files {
-            let path_str = file.to_string_lossy().to_lowercase();
-            let mut score = 0;
-
-            // Higher score for original locations
-            if path_str.contains("/applications/") {
-                score += 10;
-            }
-            if path_str.contains("/documents/") {
-                score += 8;
-            }
-            if !path_str.contains("/downloads/") {
-                score += 5;
-            }
-            if !path_str.contains("/cache") && !path_str.contains("/tmp") {
-                score += 5;
-            }
-
-            // Prefer older files (likely original)
-            if let Ok(metadata) = fs::metadata(file) {
-                if let Ok(created) = metadata.created() {
-                    let age = DateTime::<Utc>::from(created);
-                    let days_old = Utc::now().signed_duration_since(age).num_days();
-                    score += (days_old / 30) as i32; // Older files get higher score
-                }
-            }
-
-            candidates.push((file.clone(), score));
-        }
-
-        candidates.sort_by(|a, b| b.1.cmp(&a.1));
-        candidates.first().map(|(path, _)| path.clone())
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DuplicateGroup {
-    pub hash: String,
-    pub files: Vec<PathBuf>,
-    pub total_size: u64,
-    pub recommended_to_keep: Option<PathBuf>,
 }

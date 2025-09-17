@@ -7,157 +7,120 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 10px 24px;
-    border-radius: 24px;
-    font-size: 14px;
+    gap: 0.625rem;
+    padding: 0.65rem 1.6rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-size: 0.95rem;
     font-weight: 500;
-    letter-spacing: 0.01em;
+    letter-spacing: 0.02em;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast), border var(--transition-fast);
+    background: transparent;
+    color: inherit;
     position: relative;
-    border: none;
-    outline: none;
-    text-decoration: none;
-    line-height: 1.5;
-    white-space: nowrap;
-    user-select: none;
-    -webkit-user-select: none;
 }
 
-/* Smooth hover lift */
-.btn:hover {
-    transform: translateY(-1px);
+.btn svg {
+    flex-shrink: 0;
 }
 
-.btn:active {
-    transform: translateY(0);
-}
-
-/* Primary Button - Elegant & Refined */
 .btn-primary {
-    background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
-    color: #ffffff;
-    box-shadow: 
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    font-weight: 500;
+    background: var(--accent-primary);
+    color: var(--accent-contrast);
+    border-color: transparent;
+    box-shadow: 0 14px 32px rgba(17, 17, 17, 0.15);
 }
 
 .btn-primary:hover {
-    background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%);
-    box-shadow: 
-        0 4px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    background: var(--accent-hover);
+    transform: translateY(-1px);
 }
 
-.btn-primary:active {
-    box-shadow: 
-        0 1px 4px rgba(0, 0, 0, 0.15),
-        inset 0 1px 2px rgba(0, 0, 0, 0.2);
-}
-
-/* Secondary Button - Clean & Minimal */
 .btn-secondary {
-    background: #ffffff;
-    color: #1a1a1a;
-    border: 1.5px solid #e0e0e0;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    background: var(--bg-elevated);
+    border-color: var(--border-default);
+    color: var(--text-primary);
+    box-shadow: 0 12px 28px rgba(17, 17, 17, 0.08);
 }
 
 .btn-secondary:hover {
-    background: #f8f8f8;
-    border-color: #d0d0d0;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
 }
 
-.btn-secondary:active {
-    background: #f0f0f0;
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-/* Ghost Button - Subtle & Elegant */
-.btn-ghost {
-    background: transparent;
-    color: #4a4a4a;
-    border: 1.5px solid #d0d0d0;
-}
-
-.btn-ghost:hover {
-    background: rgba(0, 0, 0, 0.02);
-    border-color: #b0b0b0;
-    color: #2a2a2a;
-}
-
-.btn-ghost:active {
-    background: rgba(0, 0, 0, 0.04);
-}
-
-/* Danger Button - Subtle Warning */
 .btn-danger {
-    background: linear-gradient(135deg, #2a2a2a 0%, #3a3a3a 100%);
-    color: #ffffff;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    background: transparent;
+    border-color: rgba(17, 17, 17, 0.35);
+    color: var(--accent-primary);
+    box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.08);
 }
 
 .btn-danger:hover {
-    background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    background: rgba(17, 17, 17, 0.08);
 }
 
-/* Icon Button - Circular & Clean */
-.btn-icon {
-    width: 40px;
-    height: 40px;
+.btn-ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-secondary);
+}
+
+.btn-ghost:hover {
+    color: var(--text-primary);
+    transform: translateY(-1px);
+}
+
+.btn-link {
     padding: 0;
-    border-radius: 50%;
-    background: #ffffff;
-    border: 1.5px solid #e0e0e0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+    border-radius: 0;
+    border: none;
+    color: var(--accent-primary);
+    background: none;
+    box-shadow: none;
 }
 
-.btn-icon:hover {
-    background: #f8f8f8;
-    border-color: #d0d0d0;
-    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.1);
-    transform: translateY(-2px);
+.btn-link:hover {
+    transform: none;
+    text-decoration: underline;
 }
 
-.btn-icon:active {
-    transform: translateY(0);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-/* Button Sizes */
 .btn-small {
-    padding: 7px 18px;
-    font-size: 13px;
-    border-radius: 20px;
+    padding: 0.45rem 1.1rem;
+    font-size: 0.85rem;
 }
 
 .btn-large {
-    padding: 14px 32px;
-    font-size: 16px;
-    border-radius: 28px;
+    padding: 0.8rem 2rem;
+    font-size: 1.05rem;
 }
 
-/* Button States */
+.btn-icon {
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--border-default);
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-xs);
+}
+
+.btn-icon:hover {
+    transform: translateY(-1px);
+}
+
 .btn:disabled {
-    opacity: 0.5;
     cursor: not-allowed;
-    transform: none !important;
-    box-shadow: none !important;
+    opacity: 0.45;
+    transform: none;
+    box-shadow: none;
 }
 
 .btn:focus-visible {
-    outline: 2px solid rgba(0, 0, 0, 0.2);
-    outline-offset: 2px;
+    outline: 2px solid rgba(17, 17, 17, 0.35);
+    outline-offset: 3px;
 }
 
-/* Loading State */
 .btn-loading {
     color: transparent;
     pointer-events: none;
@@ -166,38 +129,28 @@
 .btn-loading::after {
     content: '';
     position: absolute;
-    width: 16px;
-    height: 16px;
     top: 50%;
     left: 50%;
-    margin-left: -8px;
-    margin-top: -8px;
-    border: 2px solid #d0d0d0;
+    transform: translate(-50%, -50%);
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
-    border-top-color: #4a4a4a;
-    animation: spin 0.6s linear infinite;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-top-color: var(--accent-contrast);
+    animation: button-spin 0.6s linear infinite;
 }
 
-@keyframes spin {
-    to { transform: rotate(360deg); }
+@keyframes button-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
-/* Button Group */
 .button-group {
     display: flex;
     gap: 12px;
-    align-items: center;
+    flex-wrap: wrap;
 }
-
-.button-group-connected {
-    display: flex;
-    gap: 0;
-}
-
-.button-group-connected .btn:not(:first-child) {
-    border-top-left-radius: 0;
-    border-bottom-left-radius: 0;
-    margin-left: -1px;
 }
 
 .button-group-connected .btn:not(:last-child) {

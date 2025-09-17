@@ -16,12 +16,12 @@ class OperationQueue {
      * Add an operation to the queue with optional debouncing
      */
     async add(operation, options = {}) {
-        const { 
-            debounce = 0, 
-            priority = 0, 
-            id = null, 
+        const {
+            debounce = 0,
+            priority = 0,
+            id = null,
             description = 'Operation',
-            timeout = 30000 
+            timeout = null,
         } = options;
         
         // Debounce if needed
@@ -86,21 +86,24 @@ class OperationQueue {
         const startTime = Date.now();
         const waitTime = startTime - enqueuedAt;
         
+        let timeoutHandle = null;
         try {
             console.log(`Executing operation: ${description} (waited ${waitTime}ms)`);
             
-            // Create timeout promise
-            const timeoutPromise = new Promise((_, timeoutReject) => {
-                setTimeout(() => {
-                    timeoutReject(new Error(`Operation timeout after ${timeout}ms`));
-                }, timeout);
-            });
-            
-            // Race between operation and timeout
-            const result = await Promise.race([
-                operation(),
-                timeoutPromise
-            ]);
+            const hasTimeout = Number.isFinite(timeout) && timeout > 0;
+            const timeoutPromise = hasTimeout
+                ? new Promise((_, timeoutReject) => {
+                      timeoutHandle = setTimeout(() => {
+                          timeoutReject(
+                              new Error(`Operation timeout after ${timeout}ms`)
+                          );
+                      }, timeout);
+                  })
+                : null;
+
+            const result = hasTimeout
+                ? await Promise.race([operation(), timeoutPromise])
+                : await operation();
             
             const duration = Date.now() - startTime;
             console.log(`Operation completed: ${description} (${duration}ms)`);
@@ -116,6 +119,9 @@ class OperationQueue {
             reject(error);
             
         } finally {
+            if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+            }
             this.running.delete(operationId);
             this.processQueue(); // Process next items in queue
         }

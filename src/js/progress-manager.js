@@ -153,6 +153,7 @@ class ProgressManager {
             'memory_optimization_admin': 'Deep Memory Clean',
             'file_scan': 'File System Scan',
             'enhanced_file_scan': 'Enhanced Scan',
+            'enhanced_file_clean': 'Enhanced File Cleaning',
             'file_clean': 'File Cleaning',
             'process_kill': 'Process Management'
         };
@@ -296,8 +297,11 @@ class ProgressManager {
     async cancelOperation(operationId) {
         console.log('Cancellation requested for operation:', operationId);
         try {
-            const { invoke } = window.__TAURI__.tauri;
-            await invoke('cancel_operation', { operation_id: operationId });
+            const invokeFn = window.__TAURI__?.invoke || window.__TAURI__?.tauri?.invoke;
+            if (typeof invokeFn !== 'function') {
+                throw new Error('Tauri invoke API unavailable');
+            }
+            await invokeFn('cancel_operation', { operation_id: operationId });
             if (window.showNotification) {
                 window.showNotification('Operation canceled', 'info');
             }

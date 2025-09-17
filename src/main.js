@@ -488,12 +488,12 @@ async function scanForCleanableFiles() {
                 throw error;
             }
         },
-        { 
-            debounce: 1000, 
-            id: 'scan-files', 
+        {
+            debounce: 1000,
+            id: 'scan-files',
             priority: 1,
             description: 'File System Scan',
-            timeout: 30000
+            timeout: 240000,
         }
     );
 }
@@ -748,10 +748,38 @@ async function cleanCategory(categoryName) {
     if (!confirmed) return;
 
     try {
-        const result = await invoke('clean_files_enhanced', { filePaths: files.map(f => f.path), allowLowSafety: allowRiskySelections });
+        const result = await operationQueue.add(
+            () =>
+                invoke('clean_files_enhanced', {
+                    filePaths: files.map(f => f.path),
+                    allowLowSafety: allowRiskySelections,
+                }),
+            {
+                description: `Enhanced File Clean (${categoryName})`,
+                priority: 1,
+                timeout: null,
+            }
+        );
         const freedBytes = result.total_freed || 0;
         const filesDeleted = result.deleted_count || 0;
-        showNotification(`Cleaned ${filesDeleted} files, freed ${formatBytes(freedBytes)}`, 'success');
+        const skipped = Array.isArray(result.failed_files) ? result.failed_files : [];
+
+        if (filesDeleted > 0) {
+            showNotification(`Cleaned ${filesDeleted} files, freed ${formatBytes(freedBytes)}`, 'success');
+        } else {
+            showNotification('No files were deleted. Review skipped items for more details.', 'info');
+        }
+
+        if (skipped.length > 0) {
+            const summary = skipped
+                .slice(0, 3)
+                .map(item => {
+                    const name = item.path?.split('/').filter(Boolean).pop() || item.path;
+                    return `${name}: ${item.reason}`;
+                })
+                .join(' • ');
+            showNotification(`Skipped ${skipped.length} item(s): ${summary}`, 'warning');
+        }
         await scanForCleanableFiles();
         // Reset category filter
         const actions = document.getElementById('category-actions');
@@ -827,11 +855,40 @@ async function cleanSelectedFiles() {
     
     try {
         showNotification('Cleaning selected files...', 'info');
-        const result = await invoke('clean_files_enhanced', { filePaths: selectedFiles, allowLowSafety: allowRiskySelections });
+        const result = await operationQueue.add(
+            () =>
+                invoke('clean_files_enhanced', {
+                    filePaths: selectedFiles,
+                    allowLowSafety: allowRiskySelections,
+                }),
+            {
+                description: 'Enhanced File Clean (Selection)',
+                priority: 1,
+                timeout: null,
+            }
+        );
         const freedBytes = result.total_freed || 0;
         const filesDeleted = result.deleted_count || 0;
+        const skipped = Array.isArray(result.failed_files) ? result.failed_files : [];
+
         console.log(`Clean complete: ${filesDeleted} files deleted, ${freedBytes} bytes freed`);
-        showNotification(`Cleaned ${filesDeleted} files, freed ${formatBytes(freedBytes)}`, 'success');
+
+        if (filesDeleted > 0) {
+            showNotification(`Cleaned ${filesDeleted} files, freed ${formatBytes(freedBytes)}`, 'success');
+        } else {
+            showNotification('No files were deleted. Review skipped items for more details.', 'info');
+        }
+
+        if (skipped.length > 0) {
+            const summary = skipped
+                .slice(0, 3)
+                .map(item => {
+                    const name = item.path?.split('/').filter(Boolean).pop() || item.path;
+                    return `${name}: ${item.reason}`;
+                })
+                .join(' • ');
+            showNotification(`Skipped ${skipped.length} item(s): ${summary}`, 'warning');
+        }
         
         // Rescan after cleaning
         await scanForCleanableFiles();

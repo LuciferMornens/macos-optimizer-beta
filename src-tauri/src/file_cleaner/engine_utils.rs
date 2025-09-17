@@ -50,6 +50,21 @@ impl super::engine::FileCleaner {
         let min_age = rule.min_age_days;
         let min_size_bytes = rule.min_size_kb.map(|kb| kb * 1024);
 
+        let rule_name_lower = rule.name.to_lowercase();
+        let is_dir_based_rule = rule_name_lower.contains("folder")
+            || rule_name_lower.contains("cache")
+            || rule_name_lower.contains("container");
+
+        // Enforce directory/file expectation based on rule intent
+        if metadata.is_dir() {
+            if !is_dir_based_rule {
+                return None;
+            }
+        } else if is_dir_based_rule {
+            // Directory-focused rules shouldn't emit individual files here
+            return None;
+        }
+
         // Check file type and extensions
         if metadata.is_file() {
             if let Some(ref exts) = rule.extensions {
@@ -66,13 +81,12 @@ impl super::engine::FileCleaner {
 
         // Age filter
         if let Some(days) = min_age {
-            let relevant_time = if rule.name.to_lowercase().contains("downloads")
-                || rule.name.to_lowercase().contains("desktop")
-            {
-                metadata.created().ok().map(|t| DateTime::<Utc>::from(t))
-            } else {
-                metadata.modified().ok().map(|t| DateTime::<Utc>::from(t))
-            };
+            let relevant_time =
+                if rule_name_lower.contains("downloads") || rule_name_lower.contains("desktop") {
+                    metadata.created().ok().map(|t| DateTime::<Utc>::from(t))
+                } else {
+                    metadata.modified().ok().map(|t| DateTime::<Utc>::from(t))
+                };
 
             if let Some(file_time) = relevant_time {
                 if now.signed_duration_since(file_time) < ChronoDuration::days(days) {

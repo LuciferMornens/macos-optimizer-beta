@@ -1,9 +1,9 @@
+use super::process_snapshot::ProcessSnapshot;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use sysinfo::System;
 
 /// Multi-layer safety analysis system
 pub struct SafetyAnalyzer {
@@ -25,7 +25,18 @@ impl SafetyAnalyzer {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn analyze(&self, path: &Path, category: &str) -> SafetyMetrics {
+        self.analyze_with_snapshot(path, category, &ProcessSnapshot::empty())
+            .await
+    }
+
+    pub async fn analyze_with_snapshot(
+        &self,
+        path: &Path,
+        category: &str,
+        process_snapshot: &ProcessSnapshot,
+    ) -> SafetyMetrics {
         let mut base_score = 50u8; // Start neutral
         let mut confidence = 0.5f32;
         let mut risk_factors = Vec::new();
@@ -39,7 +50,7 @@ impl SafetyAnalyzer {
         safety_flags.merge(&pattern_result.flags);
 
         // Layer 2: Usage analysis
-        let usage_result = self.usage_analyzer.analyze(path).await;
+        let usage_result = self.usage_analyzer.analyze(path, process_snapshot).await;
         base_score = adjust_score(base_score, usage_result.score_adjustment);
         confidence = (confidence + usage_result.confidence) / 2.0;
         risk_factors.extend(usage_result.risk_factors);
@@ -194,11 +205,16 @@ impl FileUsageAnalyzer {
         }
     }
 
-    pub async fn analyze(&self, path: &Path) -> UsageAnalysisResult {
+    pub async fn analyze(
+        &self,
+        path: &Path,
+        process_snapshot: &ProcessSnapshot,
+    ) -> UsageAnalysisResult {
         let mut score_adjustment = 0i8;
         let mut confidence = 0.6f32;
         let mut risk_factors = Vec::new();
         let mut flags = SafetyFlags::default();
+        let path_lower = path.to_string_lossy().to_lowercase();
 
         // Check last access time
         if let Ok(metadata) = fs::metadata(path) {
@@ -219,7 +235,7 @@ impl FileUsageAnalyzer {
             }
 
             // Check if file is currently open by any process
-            if self.is_file_in_use(path).await {
+            if process_snapshot.command_contains_path(&path_lower) {
                 score_adjustment -= 50;
                 confidence += 0.2;
                 risk_factors.push(RiskFactor::CurrentlyInUse);
@@ -234,25 +250,6 @@ impl FileUsageAnalyzer {
             flags,
         }
     }
-
-    async fn is_file_in_use(&self, path: &Path) -> bool {
-        let mut system = System::new_all();
-        system.refresh_all();
-
-        let path_str = path.to_string_lossy();
-
-        for process in system.processes_by_name(&path_str) {
-            // Check if process has the file open
-            // This is a simplified check - in production, you'd use lsof or similar
-            for arg in process.cmd() {
-                if arg.contains(&*path_str) {
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
 }
 
 /// Inspects file content for sensitive data
@@ -260,6 +257,8 @@ pub struct ContentInspector {
     sensitive_patterns: Vec<regex::Regex>,
     binary_signatures: HashMap<Vec<u8>, String>,
 }
+
+const MAX_TEXT_SCAN_BYTES: usize = 512 * 1024; // 512KB preview window
 
 impl ContentInspector {
     pub fn new() -> Self {
@@ -332,14 +331,20 @@ impl ContentInspector {
 
         // For text files, scan for sensitive patterns
         if !flags.is_binary_file {
-            if let Ok(content) = fs::read_to_string(path) {
-                for pattern in &self.sensitive_patterns {
-                    if pattern.is_match(&content) {
-                        score_adjustment -= 30;
-                        confidence += 0.15;
-                        risk_factors.push(RiskFactor::ContainsSensitiveContent);
-                        flags.contains_sensitive_data = true;
-                        break;
+            if let Ok(file) = fs::File::open(path) {
+                use std::io::Read;
+                let mut limited = file.take(MAX_TEXT_SCAN_BYTES as u64);
+                let mut buffer = Vec::with_capacity(MAX_TEXT_SCAN_BYTES);
+                if limited.read_to_end(&mut buffer).is_ok() {
+                    let preview = String::from_utf8_lossy(&buffer);
+                    for pattern in &self.sensitive_patterns {
+                        if pattern.is_match(&preview) {
+                            score_adjustment -= 30;
+                            confidence += 0.15;
+                            risk_factors.push(RiskFactor::ContainsSensitiveContent);
+                            flags.contains_sensitive_data = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -448,6 +453,7 @@ pub enum RiskFactor {
     HasActiveDependencies,
     LargeFileSize(u64),
     UserCreatedContent,
+    SafetyAnalysisDeferred,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -532,8 +538,7 @@ pub(crate) fn adjust_score(current: u8, adjustment: i8) -> u8 {
 }
 
 pub(crate) fn should_inspect_content(path: &Path, category: &str) -> bool {
-    // Skip content inspection for known safe categories
-    let safe_categories = [
+    const SAFE_CATEGORIES: [&str; 5] = [
         "System Cache",
         "User Cache",
         "Browser Cache",
@@ -541,17 +546,28 @@ pub(crate) fn should_inspect_content(path: &Path, category: &str) -> bool {
         "Trash",
     ];
 
-    if safe_categories.contains(&category) {
+    if SAFE_CATEGORIES.contains(&category) {
         return false;
     }
 
-    // Skip for very large files
-    if let Ok(metadata) = fs::metadata(path) {
-        if metadata.len() > 100 * 1024 * 1024 {
-            // 100MB
-            return false;
-        }
+    let metadata = match fs::metadata(path) {
+        Ok(meta) => meta,
+        Err(_) => return false,
+    };
+
+    if metadata.len() > 50 * 1024 * 1024 {
+        // Text inspection becomes too expensive beyond 50MB
+        return false;
     }
 
-    true
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        let ext = ext.to_lowercase();
+        const TEXT_EXTS: [&str; 17] = [
+            "txt", "log", "md", "markdown", "json", "yaml", "yml", "plist", "conf", "ini", "cfg",
+            "csv", "tsv", "env", "sh", "bash", "zsh",
+        ];
+        return TEXT_EXTS.contains(&ext.as_str());
+    }
+
+    false
 }
