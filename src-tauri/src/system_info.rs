@@ -1,7 +1,7 @@
 use libc::{kill as libc_kill, SIGKILL, SIGTERM};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
-use sysinfo::{Components, Disks, Networks, Pid, System};
+use sysinfo::{Components, Networks, Pid, System};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemInfo {
@@ -45,6 +45,9 @@ pub struct DiskInfo {
     pub used_space: u64,
     pub file_system: String,
     pub is_removable: bool,
+    pub device: String,
+    pub kind: String,
+    pub is_system: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -78,12 +81,10 @@ pub struct SystemMonitor {
     system: System,
     last_full_refresh: Instant,
     last_process_refresh: Instant,
-    last_memory_refresh: Instant,
     refresh_interval: Duration,
 }
 
 enum RefreshComponent {
-    Memory,
     Processes,
     All,
 }
@@ -96,7 +97,6 @@ impl SystemMonitor {
             system,
             last_full_refresh: Instant::now(),
             last_process_refresh: Instant::now(),
-            last_memory_refresh: Instant::now(),
             refresh_interval: Duration::from_secs(5),
         }
     }
@@ -109,12 +109,6 @@ impl SystemMonitor {
         let now = Instant::now();
 
         match component {
-            RefreshComponent::Memory => {
-                if now.duration_since(self.last_memory_refresh) > Duration::from_millis(500) {
-                    self.system.refresh_memory();
-                    self.last_memory_refresh = now;
-                }
-            }
             RefreshComponent::Processes => {
                 if now.duration_since(self.last_process_refresh) > Duration::from_secs(1) {
                     self.system.refresh_processes();
@@ -126,7 +120,6 @@ impl SystemMonitor {
                     self.system.refresh_all();
                     self.last_full_refresh = now;
                     self.last_process_refresh = now;
-                    self.last_memory_refresh = now;
                 }
             }
         }
@@ -140,31 +133,6 @@ impl SystemMonitor {
             hostname: System::host_name().unwrap_or_default(),
             uptime: System::uptime(),
             boot_time: System::boot_time(),
-        }
-    }
-
-    pub fn get_memory_info(&mut self) -> MemoryInfo {
-        self.refresh_selective(RefreshComponent::Memory);
-        let total_memory = self.system.total_memory();
-        let used_memory = self.system.used_memory();
-        let available_memory = self.system.available_memory();
-        let free_memory = self.system.free_memory();
-
-        let memory_pressure = if total_memory > 0 {
-            (used_memory as f32 / total_memory as f32) * 100.0
-        } else {
-            0.0
-        };
-
-        MemoryInfo {
-            total_memory,
-            used_memory,
-            available_memory,
-            free_memory,
-            total_swap: self.system.total_swap(),
-            used_swap: self.system.used_swap(),
-            free_swap: self.system.free_swap(),
-            memory_pressure,
         }
     }
 
@@ -193,28 +161,6 @@ impl SystemMonitor {
         processes
     }
 
-    pub fn get_disks(&self) -> Vec<DiskInfo> {
-        let disks = Disks::new_with_refreshed_list();
-        disks
-            .iter()
-            .map(|disk| {
-                let total_space = disk.total_space();
-                let available_space = disk.available_space();
-                let used_space = total_space - available_space;
-
-                DiskInfo {
-                    name: disk.name().to_string_lossy().to_string(),
-                    mount_point: disk.mount_point().to_string_lossy().to_string(),
-                    total_space,
-                    available_space,
-                    used_space,
-                    file_system: disk.file_system().to_string_lossy().to_string(),
-                    is_removable: disk.is_removable(),
-                }
-            })
-            .collect()
-    }
-
     pub fn get_network_info(&self) -> Vec<NetworkInfo> {
         let networks = Networks::new_with_refreshed_list();
         networks
@@ -228,23 +174,6 @@ impl SystemMonitor {
                 transmitted_packets: data.total_packets_transmitted(),
             })
             .collect()
-    }
-
-    pub fn get_cpu_info(&mut self) -> CpuInfo {
-        self.refresh_selective(RefreshComponent::Memory);
-        let cpus = self.system.cpus();
-        let cpu_usage = cpus.iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32;
-
-        CpuInfo {
-            brand: cpus
-                .first()
-                .map(|c| c.brand().to_string())
-                .unwrap_or_default(),
-            frequency: cpus.first().map(|c| c.frequency()).unwrap_or(0),
-            cpu_usage,
-            core_count: cpus.len(),
-            physical_core_count: self.system.physical_core_count().unwrap_or(0),
-        }
     }
 
     pub fn get_temperatures(&self) -> Vec<TemperatureInfo> {

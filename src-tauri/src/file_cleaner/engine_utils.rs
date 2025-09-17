@@ -1,7 +1,7 @@
 // src/file_cleaner/engine_utils.rs
 
 #[cfg(feature = "parallel-scan")]
-use super::safety::{calculate_safety_score, is_safe_to_delete};
+use super::safety::{assess_path_risk, calculate_safety_score, RiskLevel};
 #[cfg(feature = "parallel-scan")]
 use super::types::{CategoryRule, CleanableFile};
 #[cfg(feature = "parallel-scan")]
@@ -99,9 +99,12 @@ impl super::engine::FileCleaner {
             .map(|t| DateTime::<Utc>::from(t).timestamp())
             .unwrap_or(0);
 
-        let is_safe = rule.safe && is_safe_to_delete(file_path);
-        let (safety_score, auto_select) =
-            calculate_safety_score(file_path, &rule.name, rule.min_age_days, is_safe);
+        let risk = assess_path_risk(file_path);
+        let path_is_safe = matches!(risk.level, RiskLevel::Safe);
+        let is_safe = rule.safe && path_is_safe;
+        let (safety_score, mut auto_select) =
+            calculate_safety_score(file_path, &rule.name, &risk, rule.min_age_days);
+        auto_select = auto_select && rule.safe && path_is_safe;
 
         Some(CleanableFile {
             path: path_str,

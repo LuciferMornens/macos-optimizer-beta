@@ -11,6 +11,8 @@ mod stats;
 mod utils;
 use tokio_util::sync::CancellationToken;
 
+use crate::metrics::MemoryStats;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MemoryOptimizationResult {
     pub memory_before: MemoryStats,
@@ -20,18 +22,6 @@ pub struct MemoryOptimizationResult {
     pub success: bool,
     pub message: String,
     pub optimizations_performed: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MemoryStats {
-    pub total: u64,
-    pub available: u64,
-    pub used: u64,
-    pub wired: u64,
-    pub compressed: u64,
-    pub swap_used: u64,
-    pub app_memory: u64,
-    pub cache_files: u64,
 }
 
 pub struct MemoryOptimizer;

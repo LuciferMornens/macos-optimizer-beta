@@ -1,6 +1,7 @@
 mod config;
 mod file_cleaner;
 mod memory_optimizer;
+mod metrics;
 mod ops;
 mod system_info;
 
@@ -8,7 +9,9 @@ use file_cleaner::{
     CleanableFile, CleaningReport, EnhancedCleaningReport, EnhancedFileCleaner, FileCleaner,
     UserAction,
 };
-use memory_optimizer::{MemoryOptimizationResult, MemoryOptimizer, MemoryStats};
+use memory_optimizer::{MemoryOptimizationResult, MemoryOptimizer};
+use metrics::MemoryStats;
+use metrics::{CpuSnapshot, DiskSnapshot, MetricsSampler, MetricsSnapshot, SampleEnvelope};
 use system_info::{CpuInfo, DiskInfo, MemoryInfo, ProcessInfo, SystemInfo, SystemMonitor};
 
 use file_cleaner::{load_rules_result, DynamicRuleEngine, RuleValidator};
@@ -57,28 +60,93 @@ struct AppState {
     file_cleaner: RwLock<FileCleaner>,
     enhanced_file_cleaner: RwLock<EnhancedFileCleaner>,
     memory_optimizer: RwLock<MemoryOptimizer>,
+    metrics_sampler: MetricsSampler,
     ops: OperationRegistry,
+}
+
+fn sample_value<T: Clone>(envelope: &SampleEnvelope<T>, label: &str) -> Result<T, String> {
+    envelope.value.clone().ok_or_else(|| {
+        envelope
+            .error
+            .clone()
+            .unwrap_or_else(|| format!("{} sample unavailable", label))
+    })
+}
+
+fn memory_info_from_stats(stats: &MemoryStats) -> MemoryInfo {
+    MemoryInfo {
+        total_memory: stats.total,
+        used_memory: stats.used,
+        available_memory: stats.available,
+        free_memory: stats.available,
+        total_swap: stats.swap_total,
+        used_swap: stats.swap_used,
+        free_swap: stats.swap_free,
+        memory_pressure: stats.pressure_percent,
+    }
+}
+
+fn cpu_info_from_snapshot(cpu: &CpuSnapshot) -> CpuInfo {
+    CpuInfo {
+        brand: cpu.brand.clone(),
+        frequency: cpu.frequency_hz,
+        cpu_usage: cpu.total_usage,
+        core_count: cpu.core_count,
+        physical_core_count: cpu.physical_core_count,
+    }
+}
+
+fn disks_from_snapshots(disks: Vec<DiskSnapshot>) -> Vec<DiskInfo> {
+    disks
+        .into_iter()
+        .map(|disk| DiskInfo {
+            name: disk.name,
+            mount_point: disk.mount_point,
+            total_space: disk.total_space,
+            available_space: disk.available_space,
+            used_space: disk.used_space,
+            file_system: disk.file_system,
+            is_removable: disk.is_removable,
+            device: disk.device,
+            kind: disk.kind,
+            is_system: disk.is_system,
+        })
+        .collect()
 }
 
 #[tauri::command]
 async fn get_system_info(state: State<'_, AppState>) -> Result<SystemInfo, String> {
+    state.metrics_sampler.wait_until_ready().await;
+    let snapshot = state.metrics_sampler.latest_snapshot().await;
+
     let mut monitor = state.system_monitor.write().await;
     monitor.refresh();
-    Ok(monitor.get_system_info())
+    let mut info = monitor.get_system_info();
+
+    if let Ok(uptime) = sample_value(&snapshot.uptime, "uptime") {
+        info.uptime = uptime.uptime_seconds;
+        info.boot_time = uptime.boot_time_seconds;
+    }
+
+    Ok(info)
 }
 
 #[tauri::command]
 async fn get_memory_info(state: State<'_, AppState>) -> Result<MemoryInfo, String> {
-    let mut monitor = state.system_monitor.write().await;
-    monitor.refresh();
-    Ok(monitor.get_memory_info())
+    state.metrics_sampler.wait_until_ready().await;
+    let snapshot = state.metrics_sampler.latest_snapshot().await;
+    let stats = sample_value(&snapshot.memory, "memory")?;
+
+    Ok(memory_info_from_stats(&stats))
 }
 
 #[tauri::command]
 async fn get_cpu_info(state: State<'_, AppState>) -> Result<CpuInfo, String> {
-    let mut monitor = state.system_monitor.write().await;
-    monitor.refresh();
-    Ok(monitor.get_cpu_info())
+    state.metrics_sampler.wait_until_ready().await;
+    let snapshot = state.metrics_sampler.latest_snapshot().await;
+    let cpu = sample_value(&snapshot.cpu, "cpu")?;
+
+    Ok(cpu_info_from_snapshot(&cpu))
 }
 
 #[tauri::command]
@@ -100,9 +168,17 @@ async fn get_top_memory_processes(
 
 #[tauri::command]
 async fn get_disks(state: State<'_, AppState>) -> Result<Vec<DiskInfo>, String> {
-    let mut monitor = state.system_monitor.write().await;
-    monitor.refresh();
-    Ok(monitor.get_disks())
+    state.metrics_sampler.wait_until_ready().await;
+    let snapshot = state.metrics_sampler.latest_snapshot().await;
+    let disks = sample_value(&snapshot.disks, "disks")?;
+
+    Ok(disks_from_snapshots(disks))
+}
+
+#[tauri::command]
+async fn get_metrics_snapshot(state: State<'_, AppState>) -> Result<MetricsSnapshot, String> {
+    state.metrics_sampler.wait_until_ready().await;
+    Ok(state.metrics_sampler.latest_snapshot().await)
 }
 
 #[tauri::command]
@@ -994,9 +1070,9 @@ async fn get_memory_pressure(state: State<'_, AppState>) -> Result<f32, String> 
 
 #[tauri::command]
 async fn get_memory_stats(state: State<'_, AppState>) -> Result<MemoryStats, String> {
-    // We don't need the optimizer instance, but lock to keep API consistent
-    drop(state.memory_optimizer.read().await);
-    MemoryOptimizer::get_memory_stats()
+    state.metrics_sampler.wait_until_ready().await;
+    let snapshot = state.metrics_sampler.latest_snapshot().await;
+    sample_value(&snapshot.memory, "memory")
 }
 
 #[tauri::command]
@@ -1052,30 +1128,21 @@ async fn optimize_swap(state: State<'_, AppState>) -> Result<String, String> {
 // Batched dashboard endpoint for Phase 3
 #[tauri::command]
 async fn get_dashboard_data(state: State<'_, AppState>) -> Result<DashboardData, String> {
-    // Execute all dashboard queries in parallel
-    let (memory_info, cpu_info, disk_info, top_processes) = tokio::join!(
-        async {
-            let mut m = state.system_monitor.write().await;
-            m.get_memory_info()
-        },
-        async {
-            let mut m = state.system_monitor.write().await;
-            m.get_cpu_info()
-        },
-        async {
-            let m = state.system_monitor.write().await;
-            m.get_disks()
-        },
-        async {
-            let mut m = state.system_monitor.write().await;
-            m.get_top_memory_processes(5)
-        }
-    );
+    state.metrics_sampler.wait_until_ready().await;
+    let snapshot = state.metrics_sampler.latest_snapshot().await;
+    let memory_stats = sample_value(&snapshot.memory, "memory")?;
+    let cpu_snapshot = sample_value(&snapshot.cpu, "cpu")?;
+    let disk_snapshots = sample_value(&snapshot.disks, "disks")?;
+
+    let top_processes = {
+        let mut monitor = state.system_monitor.write().await;
+        monitor.get_top_memory_processes(5)
+    };
 
     Ok(DashboardData {
-        memory: memory_info,
-        cpu: cpu_info,
-        disks: disk_info,
+        memory: memory_info_from_stats(&memory_stats),
+        cpu: cpu_info_from_snapshot(&cpu_snapshot),
+        disks: disks_from_snapshots(disk_snapshots),
         top_processes,
     })
 }
@@ -1090,11 +1157,13 @@ struct DashboardData {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let metrics_sampler = MetricsSampler::spawn();
     let app_state = AppState {
         system_monitor: RwLock::new(SystemMonitor::new()),
         file_cleaner: RwLock::new(FileCleaner::new()),
         enhanced_file_cleaner: RwLock::new(EnhancedFileCleaner::new()),
         memory_optimizer: RwLock::new(MemoryOptimizer::new()),
+        metrics_sampler,
         ops: OperationRegistry::new(1, 2, 1),
     };
 
@@ -1116,6 +1185,7 @@ pub fn run() {
             get_processes,
             get_top_memory_processes,
             get_disks,
+            get_metrics_snapshot,
             kill_process,
             scan_cleanable_files,
             scan_cleanable_files_enhanced,

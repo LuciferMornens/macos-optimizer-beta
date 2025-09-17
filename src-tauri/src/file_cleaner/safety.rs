@@ -70,10 +70,6 @@ impl<'a> PathContext<'a> {
         &self.lower
     }
 
-    fn metadata(&self) -> Option<&Metadata> {
-        self.metadata.as_ref()
-    }
-
     fn size(&self) -> Option<u64> {
         self.metadata.as_ref().map(|m| m.len())
     }
@@ -150,6 +146,225 @@ impl<'a> PathContext<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RiskLevel {
+    Safe,
+    Review,
+    Risky,
+}
+
+#[derive(Debug, Clone)]
+pub struct RiskAssessment {
+    pub level: RiskLevel,
+    pub confidence: u8,
+    pub reasons: Vec<String>,
+    pub age_modified_days: Option<i64>,
+    pub age_created_days: Option<i64>,
+}
+
+fn new_assessment(ctx: &PathContext<'_>) -> RiskAssessment {
+    RiskAssessment {
+        level: RiskLevel::Review,
+        confidence: 45,
+        reasons: Vec::new(),
+        age_modified_days: ctx.age_days_modified(),
+        age_created_days: ctx.age_days_created(),
+    }
+}
+
+pub(crate) fn assess_path_risk(path: &Path) -> RiskAssessment {
+    let ctx = PathContext::new(path);
+    let mut assessment = new_assessment(&ctx);
+
+    let in_downloads = ctx.contains_sequence(&["downloads"]);
+    let extension = ctx.extension();
+
+    const PROTECTED_KEYWORDS: &[&str] = &[
+        ".ssh",
+        ".gnupg",
+        ".keychain",
+        "passwords",
+        "credentials",
+        ".env",
+        "/config/",
+        ".git/",
+        ".pem",
+        ".key",
+        ".cert",
+        ".p12",
+        "wallet",
+        "vault",
+        "important",
+        "personal",
+        "secret",
+    ];
+
+    const PROTECTED_SEQUENCES: &[&[&str]] = &[
+        &["documents"],
+        &["desktop"],
+        &["pictures"],
+        &["movies"],
+        &["music"],
+        &["photos"],
+        &["library", "preferences"],
+        &["library", "keychains"],
+        &["library", "accounts"],
+        &["library", "cookies"],
+        &["library", "mail"],
+        &["library", "messages"],
+        &["library", "safari"],
+    ];
+
+    if PROTECTED_KEYWORDS
+        .iter()
+        .any(|keyword| ctx.contains_keyword(keyword))
+        || PROTECTED_SEQUENCES
+            .iter()
+            .any(|sequence| ctx.contains_sequence(sequence))
+    {
+        assessment.level = RiskLevel::Risky;
+        assessment.confidence = 98;
+        assessment
+            .reasons
+            .push("Sensitive or personal location".into());
+        return assessment;
+    }
+
+    let mut safe_hits: Vec<(u8, String)> = Vec::new();
+    let mut review_hits: Vec<String> = Vec::new();
+
+    if ctx.contains_sequence(&[".trash"]) || ctx.ends_with_sequence(&[".trash"]) {
+        safe_hits.push((96, "Trash".into()));
+    }
+
+    let temp_sequences: &[&[&str]] = &[
+        &["tmp"],
+        &["var", "tmp"],
+        &["private", "tmp"],
+        &["private", "var", "tmp"],
+        &["library", "caches", "temporaryitems"],
+    ];
+    if temp_sequences
+        .iter()
+        .any(|sequence| ctx.contains_sequence(sequence) || ctx.ends_with_sequence(sequence))
+    {
+        safe_hits.push((90, "Temporary location".into()));
+    }
+
+    if ctx.contains_sequence(&["library", "caches"])
+        || ctx.contains_sequence(&["library", "containers", "data", "library", "caches"])
+        || ctx.contains_sequence(&["library", "group containers", "library", "caches"])
+    {
+        safe_hits.push((90, "Application cache".into()));
+    }
+
+    if ctx.contains_sequence(&["library", "caches", "com.apple.quicklook.thumbnailcache"]) {
+        safe_hits.push((92, "QuickLook cache".into()));
+    }
+
+    if ctx.contains_sequence(&[".dropbox.cache"]) {
+        safe_hits.push((85, "Dropbox cache".into()));
+    }
+
+    if ctx.contains_sequence(&["library", "developer", "xcode", "deriveddata"]) {
+        safe_hits.push((88, "Xcode derived data".into()));
+    }
+
+    if ctx.contains_sequence(&["library", "caches", "homebrew"]) {
+        safe_hits.push((86, "Homebrew cache".into()));
+    }
+    if ctx.contains_sequence(&[".npm", "_cacache"]) {
+        safe_hits.push((82, "npm cache".into()));
+    }
+    if ctx.contains_sequence(&["library", "caches", "pip"]) {
+        safe_hits.push((82, "pip cache".into()));
+    }
+    if ctx.contains_sequence(&["library", "caches", "cocoapods"]) {
+        safe_hits.push((82, "CocoaPods cache".into()));
+    }
+    if ctx.contains_sequence(&["library", "caches", "yarn"]) {
+        safe_hits.push((82, "Yarn cache".into()));
+    }
+    if ctx.contains_sequence(&["library", "caches", "go-build"]) {
+        safe_hits.push((82, "Go build cache".into()));
+    }
+
+    const APP_SUPPORT_CACHE_KEYWORDS: &[&str] = &[
+        "cache",
+        "caches",
+        "cachestorage",
+        "code cache",
+        "gpu",
+        "shadercache",
+        "tmp",
+        "temp",
+        "temporary",
+        "dawncache",
+    ];
+
+    if ctx.contains_sequence(&["library", "application support"])
+        && ctx.segment_contains_any(APP_SUPPORT_CACHE_KEYWORDS)
+    {
+        safe_hits.push((84, "Application support cache".into()));
+    }
+
+    let incomplete_exts = ["crdownload", "download", "part", "partial", "tmp", "aria2"];
+    if in_downloads {
+        if let Some(ext) = extension.as_deref() {
+            if incomplete_exts.iter().any(|candidate| candidate == &ext) {
+                safe_hits.push((80, "Incomplete download stub".into()));
+            } else if matches!(ext, "dmg" | "pkg" | "zip") {
+                review_hits.push("Installer in Downloads".into());
+            } else {
+                review_hits.push("User download".into());
+            }
+        } else {
+            review_hits.push("User download".into());
+        }
+    }
+
+    if ctx.contains_sequence(&["library", "saved application state"]) {
+        review_hits.push("Saved application state".into());
+    }
+    if ctx.contains_sequence(&["library", "logs"]) {
+        review_hits.push("Log files".into());
+    }
+
+    if let Some((conf, reason)) = safe_hits.iter().max_by_key(|entry| entry.0) {
+        assessment.level = RiskLevel::Safe;
+        assessment.confidence = *conf;
+        assessment.reasons.push(reason.clone());
+    } else if !review_hits.is_empty() {
+        assessment.level = RiskLevel::Review;
+        assessment.confidence = 55;
+        assessment.reasons.extend(review_hits);
+    } else {
+        assessment.reasons.push("Uncategorised location".into());
+    }
+
+    if let Some(age) = assessment.age_modified_days {
+        if assessment.level == RiskLevel::Safe
+            && age < 1
+            && !assessment.reasons.iter().any(|reason| {
+                reason.contains("Incomplete download")
+                    || reason.contains("Trash")
+                    || reason.contains("Temporary")
+            })
+        {
+            assessment.level = RiskLevel::Review;
+            assessment.confidence = assessment.confidence.min(60);
+            assessment.reasons.push("Recently modified (<24h)".into());
+        }
+        if assessment.level == RiskLevel::Review && age >= 60 {
+            assessment.level = RiskLevel::Safe;
+            assessment.confidence = assessment.confidence.max(70);
+            assessment.reasons.push("Stale (>60d)".into());
+        }
+    }
+
+    assessment
+}
+
 pub(crate) fn policy_for_category(category: &str) -> SafetyPolicy {
     let c = category.to_lowercase();
     // Always safe/auto buckets
@@ -207,236 +422,27 @@ pub(crate) fn policy_for_category(category: &str) -> SafetyPolicy {
     SafetyPolicy::disabled()
 }
 
-pub(crate) fn is_safe_to_delete(path: &Path) -> bool {
-    let ctx = PathContext::new(path);
-
-    let age_modified = ctx.age_days_modified();
-    let age_created = ctx.age_days_created();
-    let age_for_downloads = age_created.or(age_modified);
-    let in_downloads = ctx.contains_sequence(&["downloads"]);
-    let extension = ctx.extension();
-
-    // High confidence allow-list checks (safe regardless of deny keywords)
-    let is_in_trash = ctx.contains_sequence(&[".trash"]) || ctx.ends_with_sequence(&[".trash"]);
-    if is_in_trash {
-        return true;
-    }
-
-    let temp_sequences: &[&[&str]] = &[
-        &["tmp"],
-        &["var", "tmp"],
-        &["private", "tmp"],
-        &["private", "var", "tmp"],
-        &["library", "caches", "temporaryitems"],
-    ];
-    let is_tmp = temp_sequences
-        .iter()
-        .any(|sequence| ctx.contains_sequence(sequence) || ctx.ends_with_sequence(sequence));
-    if is_tmp {
-        return true;
-    }
-
-    let is_library_caches = ctx.contains_sequence(&["library", "caches"]);
-    let is_container_root = ctx.contains_sequence(&["library", "containers"])
-        || ctx.contains_sequence(&["library", "group containers"]);
-    let is_container_caches = is_container_root
-        && (ctx.contains_sequence(&["library", "caches"])
-            || ctx.segment_contains_any(&["cache", "tmp", "temp", "temporary"]));
-    if is_library_caches || is_container_caches {
-        return true;
-    }
-
-    let is_quicklook_cache =
-        ctx.contains_sequence(&["library", "caches", "com.apple.quicklook.thumbnailcache"]);
-    if is_quicklook_cache {
-        return true;
-    }
-
-    let is_app_store_cache = ctx.contains_sequence(&["library", "caches", "com.apple.appstore"]);
-    let is_music_cache = ctx.contains_sequence(&["library", "caches", "com.apple.music"]);
-    if is_app_store_cache || is_music_cache {
-        return true;
-    }
-
-    let is_dropbox_cache = ctx.contains_sequence(&[".dropbox.cache"]);
-    if is_dropbox_cache {
-        return true;
-    }
-
-    let is_xcode_deriveddata =
-        ctx.contains_sequence(&["library", "developer", "xcode", "deriveddata"]);
-    if is_xcode_deriveddata {
-        return true;
-    }
-
-    let is_homebrew_cache = ctx.contains_sequence(&["library", "caches", "homebrew"]);
-    let is_npm_cache = ctx.contains_sequence(&[".npm", "_cacache"]);
-    let is_pip_cache = ctx.contains_sequence(&["library", "caches", "pip"]);
-    let is_cocoapods_cache = ctx.contains_sequence(&["library", "caches", "cocoapods"]);
-    let is_yarn_cache = ctx.contains_sequence(&["library", "caches", "yarn"]);
-    let is_go_build_cache = ctx.contains_sequence(&["library", "caches", "go-build"]);
-    if is_homebrew_cache
-        || is_npm_cache
-        || is_pip_cache
-        || is_cocoapods_cache
-        || is_yarn_cache
-        || is_go_build_cache
-    {
-        return true;
-    }
-
-    // Deny sensitive patterns before evaluating age-based allowances
-    const PROTECTED_KEYWORDS: &[&str] = &[
-        ".ssh",
-        ".gnupg",
-        ".keychain",
-        "passwords",
-        "credentials",
-        ".env",
-        "/config/",
-        ".git/",
-        ".pem",
-        ".key",
-        ".cert",
-        ".p12",
-        "wallet",
-        "vault",
-        "important",
-        "personal",
-        "secret",
-    ];
-
-    const PROTECTED_SEQUENCES: &[&[&str]] = &[
-        &["documents"],
-        &["desktop"],
-        &["pictures"],
-        &["movies"],
-        &["music"],
-        &["photos"],
-        &["node_modules"],
-        &["library", "preferences"],
-        &["library", "keychains"],
-        &["library", "accounts"],
-        &["library", "cookies"],
-        &["library", "mail"],
-        &["library", "messages"],
-        &["library", "safari"],
-    ];
-
-    if PROTECTED_KEYWORDS
-        .iter()
-        .any(|keyword| ctx.contains_keyword(keyword))
-    {
-        return false;
-    }
-
-    if PROTECTED_SEQUENCES
-        .iter()
-        .any(|sequence| ctx.contains_sequence(sequence))
-    {
-        return false;
-    }
-
-    // Age-gated and contextual allowances
-    let is_saved_state = ctx.contains_sequence(&["library", "saved application state"]);
-    let saved_state_old = is_saved_state && age_modified.map(|days| days >= 30).unwrap_or(false);
-
-    let is_diag_reports = ctx.contains_sequence(&["library", "logs", "diagnosticreports"])
-        || ctx.contains_sequence(&["library", "diagnosticreports"]);
-    let diag_reports_old = is_diag_reports && age_modified.map(|days| days >= 30).unwrap_or(false);
-
-    let is_logs_path = ctx.contains_sequence(&["logs"]);
-    let logs_old = is_logs_path && age_modified.map(|days| days >= 30).unwrap_or(false);
-
-    let incomplete_exts = ["crdownload", "download", "part", "partial", "tmp", "aria2"];
-    let is_incomplete_download = in_downloads
-        && extension
-            .as_deref()
-            .map(|ext| incomplete_exts.iter().any(|candidate| candidate == &ext))
-            .unwrap_or(false)
-        && age_modified.map(|days| days >= 2).unwrap_or(false);
-
-    let is_ios_update = extension
-        .as_deref()
-        .map(|ext| ext == "ipsw")
-        .unwrap_or(false)
-        && (ctx.contains_sequence(&["library", "itunes", "iphone software updates"])
-            || ctx.contains_sequence(&["library", "itunes", "ipad software updates"]))
-        && age_modified.map(|days| days >= 30).unwrap_or(false);
-
-    let is_old_installer = in_downloads
-        && extension
-            .as_deref()
-            .map(|ext| matches!(ext, "dmg" | "pkg" | "zip"))
-            .unwrap_or(false)
-        && age_for_downloads.map(|days| days >= 30).unwrap_or(false);
-
-    let is_xcode_devicesupport =
-        ctx.contains_sequence(&["library", "developer", "xcode", "ios devicesupport"]);
-    let xcode_devicesupport_old =
-        is_xcode_devicesupport && age_modified.map(|days| days >= 90).unwrap_or(false);
-
-    let is_coresim = ctx.contains_sequence(&["library", "developer", "coresimulator"]);
-    let is_coresim_cachey = is_coresim
-        && (ctx.contains_sequence(&["logs"])
-            && age_modified.map(|days| days >= 30).unwrap_or(false)
-            || ctx.segment_contains_any(&["cache", "tmp", "temp", "dlog"]));
-    let coresim_logs_old = is_coresim
-        && ctx.contains_sequence(&["logs"])
-        && age_modified.map(|days| days >= 30).unwrap_or(false);
-
-    const APP_SUPPORT_CACHE_KEYWORDS: &[&str] = &[
-        "cache",
-        "caches",
-        "cachestorage",
-        "code cache",
-        "gpu",
-        "shadercache",
-        "tmp",
-        "temp",
-        "temporary",
-        "dawncache",
-    ];
-
-    let is_app_support_cache_like = ctx.contains_sequence(&["library", "application support"])
-        && ctx.segment_contains_any(APP_SUPPORT_CACHE_KEYWORDS);
-
-    if saved_state_old
-        || diag_reports_old
-        || logs_old
-        || is_incomplete_download
-        || is_ios_update
-        || is_old_installer
-        || xcode_devicesupport_old
-        || is_coresim_cachey
-        || coresim_logs_old
-        || is_app_support_cache_like
-    {
-        return true;
-    }
-
-    false
-}
-
 pub(crate) fn calculate_safety_score(
     path: &Path,
     category: &str,
-    days_old: Option<i64>,
-    is_safe: bool,
+    risk: &RiskAssessment,
+    rule_min_age: Option<i64>,
 ) -> (u8, bool) {
-    if !is_safe {
-        return (0, false);
-    }
-
     let ctx = PathContext::new(path);
-    let mut score: u8;
+
+    let mut score: i16 = match risk.level {
+        RiskLevel::Safe => 80 + (risk.confidence as i16 / 3),
+        RiskLevel::Review => 55,
+        RiskLevel::Risky => 25,
+    };
+
+    let allow_auto = matches!(risk.level, RiskLevel::Safe) && risk.confidence >= 65;
     let mut auto_select = false;
 
-    // Category-based scoring
     match category {
         "Trash" => {
             score = 100;
-            auto_select = true; // Always auto-select trash
+            auto_select = allow_auto;
         }
         "System Cache"
         | "System Cache (Advanced)"
@@ -446,155 +452,90 @@ pub(crate) fn calculate_safety_score(
         | "Music Cache"
         | "Container Caches (Advanced)"
         | "Group Container Caches (Advanced)"
-        | "Dropbox Cache" => {
-            score = 95;
-            auto_select = true; // Caches are very safe to delete
+        | "Dropbox Cache"
+        | "QuickLook Cache" => {
+            score = score.max(92);
+            auto_select = allow_auto;
         }
         "App Support Caches (Advanced)" => {
-            score = 85;
-            auto_select = false; // Be conservative: review before auto-select
+            score = score.max(85);
         }
         "Temporary Files" | "User Temporary Files" | "Container Temp (Advanced)" => {
-            score = 90;
-            auto_select = true; // Temp files are safe
+            score = score.max(90);
+            auto_select = allow_auto;
         }
         "Saved Application State (30d+)" => {
-            score = 90;
-            // Old saved states are safe
-            if let Some(days) = days_old {
-                if days >= 30 {
-                    auto_select = true;
-                }
+            score = score.max(88);
+            if rule_min_age.unwrap_or(0) >= 30 {
+                auto_select = allow_auto;
             }
         }
         "Incomplete Downloads (2d+)" => {
-            score = 95;
-            auto_select = true; // Incomplete downloads with min age are safe
+            score = score.max(88);
+            auto_select = allow_auto;
         }
         "User Logs (30d+)"
         | "System Logs (30d+, Advanced)"
         | "Crash Reports (30d+)"
         | "System Crash Reports (30d+, Advanced)" => {
-            score = 80;
-            // Only auto-select old logs
-            if let Some(days) = days_old {
-                if days >= 30 {
-                    auto_select = true;
-                }
+            score = score.max(78);
+            if rule_min_age.unwrap_or(0) >= 30 {
+                auto_select = allow_auto;
             }
         }
         "Old Downloads" | "Old Downloads (90d+)" | "Old Installers (30d+)" => {
-            score = 60;
-            // Don't auto-select downloads, user should review
-            auto_select = false;
+            score = score.max(60);
         }
         "Large Stale Files (Desktop/Downloads)"
         | "Mail Downloads (Review)"
-        | "Messages Attachments (90d+, Review)" => {
-            score = 50;
-            auto_select = false; // Review before deleting
+        | "Messages Attachments (90d+, Review)"
+        | "iOS Updates (Advanced)"
+        | "iOS Backups (Advanced)" => {
+            score = score.max(45);
         }
-        "iOS Updates (Advanced)" => {
-            score = 50;
-            auto_select = false;
-        }
-        "iOS Backups (Advanced)" => {
-            score = 40;
-            auto_select = false;
-        }
-        _ => {
-            score = 40;
-            auto_select = false;
+        _ => {}
+    }
+
+    if category.to_lowercase().contains("cache") || category.to_lowercase().contains("temp") {
+        score = score.max(88);
+        if allow_auto {
+            auto_select = true;
         }
     }
 
-    // Boost caches/temp even if category name isn't one of the explicit matches
-    let cat_lower = category.to_lowercase();
-    if is_safe && (cat_lower.contains("cache") || cat_lower.contains("temp")) {
-        // Ensure a high score for safe cache/temp buckets
-        score = score.max(90);
-        // Prefer auto-select for generic cache/temp categories
-        auto_select = true;
-    }
-
-    // File age adjustment
-    if let Some(metadata) = ctx.metadata() {
-        // Prefer creation time for Downloads/Desktop-related categories; fallback to modified time
-        let age_days_opt = (|| {
-            let name_lower = category.to_lowercase();
-            if name_lower.contains("downloads") || name_lower.contains("desktop") {
-                if let Ok(created) = metadata.created() {
-                    let created_time = DateTime::<Utc>::from(created);
-                    return Some(Utc::now().signed_duration_since(created_time).num_days());
-                }
-            }
-            if let Ok(modified) = metadata.modified() {
-                let modified_time = DateTime::<Utc>::from(modified);
-                return Some(Utc::now().signed_duration_since(modified_time).num_days());
-            }
-            None
-        })();
-
-        if let Some(age_days) = age_days_opt {
-            // Increase safety for very old files in safe categories
-            if age_days > 90 && score >= 80 {
-                // cap at 100
-                score = score.min(100);
-                if category != "Old Downloads" && category != "Xcode Archives" {
-                    auto_select = true;
-                }
-            }
-
-            // Decrease safety for recently modified files (but do NOT penalize incomplete downloads)
-            if age_days < 7 && score > 50 {
-                let name_lower = category.to_lowercase();
-                if name_lower != "incomplete downloads (2d+)" {
-                    score = score.saturating_sub(20);
-                    auto_select = false;
-                }
-            }
+    if let Some(age) = risk.age_modified_days.or(risk.age_created_days) {
+        if matches!(risk.level, RiskLevel::Safe) && age < 2 {
+            score -= 15;
+            auto_select = false;
+        }
+        if age > 120 && score >= 70 {
+            score += 5;
         }
     }
 
-    // File size adjustment for auto-select
     if let Some(size) = ctx.size() {
-        // Don't auto-select very large files (>500MB) unless they're in clearly safe buckets
-        // Exempt incomplete downloads bucket
-        if size > 500 * 1024 * 1024
-            && !matches!(
-                category,
-                "Trash"
-                    | "System Cache"
-                    | "System Cache (Advanced)"
-                    | "User Cache"
-                    | "Browser Cache"
-                    | "Temporary Files"
-                    | "User Temporary Files"
-                    | "QuickLook Cache"
-                    | "Dropbox Cache"
-                    | "Container Caches (Advanced)"
-                    | "Container Temp (Advanced)"
-                    | "Group Container Caches (Advanced)"
-                    | "Incomplete Downloads (2d+)"
-            )
-        {
+        if size > 500 * 1024 * 1024 {
             auto_select = false;
+            if score > 70 {
+                score -= 5;
+            }
         }
     }
 
-    // Path-based adjustments
     let path_str = ctx.lower();
-
-    // Increase safety for known safe patterns (FIX: use max, not min)
-    if path_str.contains(".cache") || path_str.contains("cache/") || path_str.contains("/tmp/") {
-        score = score.max(95);
-    }
-
-    // Decrease safety for patterns that might be important
     if path_str.contains("backup") || path_str.contains("archive") || path_str.contains("export") {
-        score = score.saturating_sub(30);
+        score -= 25;
         auto_select = false;
     }
 
-    (score, auto_select)
+    if path_str.contains(".cache") || path_str.contains("cache/") || path_str.contains("/tmp/") {
+        score = score.max(92);
+    }
+
+    if !matches!(risk.level, RiskLevel::Safe) {
+        auto_select = false;
+    }
+
+    let clamped = score.clamp(0, 100) as u8;
+    (clamped, auto_select)
 }

@@ -279,64 +279,81 @@ async function loadDashboard() {
     showDashboardSkeleton();
     
     try {
-        // Load critical data first (memory stats)
-        const criticalData = await Promise.race([
-            invoke('get_memory_stats'),
-            new Promise(resolve => setTimeout(() => resolve(null), 2000))
+        const [metricsResult, systemInfoResult] = await Promise.allSettled([
+            invoke('get_metrics_snapshot'),
+            invoke('get_system_info')
         ]);
-        
-        if (criticalData) {
-            console.log('Memory stats (priority):', criticalData);
-            // Update memory stats immediately
-            const memoryPercent = (criticalData.used / criticalData.total * 100).toFixed(1);
-            document.getElementById('memory-usage').textContent = `${memoryPercent}%`;
-            document.getElementById('memory-detail').textContent = 
-                `${formatBytes(criticalData.used)} / ${formatBytes(criticalData.total)}`;
-            document.getElementById('memory-progress').style.width = `${memoryPercent}%`;
+
+        const unwrapSample = (label, envelope) => {
+            if (!envelope) return null;
+            if (envelope.value) return envelope.value;
+            if (envelope.error) {
+                console.warn(`${label} sample unavailable: ${envelope.error}`);
+            }
+            return null;
+        };
+
+        let bootTimeOverride = null;
+
+        if (metricsResult.status === 'fulfilled') {
+            const snapshot = metricsResult.value;
+            const memoryStats = unwrapSample('memory', snapshot.memory);
+            const cpuStats = unwrapSample('cpu', snapshot.cpu);
+            const diskStats = unwrapSample('disk', snapshot.disks);
+            const uptimeStats = unwrapSample('uptime', snapshot.uptime);
+
+            if (memoryStats) {
+                const memoryRatio = memoryStats.total > 0 ? (memoryStats.used / memoryStats.total) : 0;
+                const memoryPercent = (memoryRatio * 100).toFixed(1);
+                document.getElementById('memory-usage').textContent = `${memoryPercent}%`;
+                document.getElementById('memory-detail').textContent =
+                    `${formatBytes(memoryStats.used)} / ${formatBytes(memoryStats.total)}`;
+                document.getElementById('memory-progress').style.width = `${memoryPercent}%`;
+            }
+
+            if (cpuStats) {
+                document.getElementById('cpu-usage').textContent = `${cpuStats.total_usage.toFixed(1)}%`;
+                document.getElementById('cpu-detail').textContent = `${cpuStats.core_count} cores`;
+                document.getElementById('cpu-progress').style.width = `${cpuStats.total_usage.toFixed(1)}%`;
+            }
+
+            if (diskStats && Array.isArray(diskStats) && diskStats.length > 0) {
+                const primaryDisk = diskStats.find(d => d.is_system) || diskStats[0];
+                const diskPercent = primaryDisk.total_space > 0
+                    ? ((primaryDisk.used_space / primaryDisk.total_space) * 100).toFixed(1)
+                    : '0.0';
+                document.getElementById('disk-usage').textContent = `${diskPercent}%`;
+                document.getElementById('disk-detail').textContent =
+                    `${formatBytes(primaryDisk.used_space)} / ${formatBytes(primaryDisk.total_space)}`;
+                document.getElementById('disk-progress').style.width = `${diskPercent}%`;
+            }
+
+            if (uptimeStats) {
+                bootTimeOverride = uptimeStats.boot_time_seconds;
+                document.getElementById('uptime').textContent = formatUptime(uptimeStats.uptime_seconds);
+                document.getElementById('boot-time').textContent =
+                    new Date(uptimeStats.boot_time_seconds * 1000).toLocaleString();
+            }
+        } else {
+            console.error('Metrics snapshot failed:', metricsResult.reason);
+            showNotification('Failed to load metrics snapshot', 'error');
         }
-        
-        // Load remaining data in parallel
-        const [systemInfo, cpuInfo, disks] = await Promise.allSettled([
-            invoke('get_system_info'),
-            invoke('get_cpu_info'),
-            invoke('get_disks')
-        ]);
-        
-        console.log('System data loaded:', { systemInfo: systemInfo.status, cpuInfo: cpuInfo.status, disks: disks.status });
-        
-        // Update CPU stats if available
-        if (cpuInfo.status === 'fulfilled') {
-            const cpu = cpuInfo.value;
-            console.log('CPU info:', cpu);
-            document.getElementById('cpu-usage').textContent = `${cpu.cpu_usage.toFixed(1)}%`;
-            document.getElementById('cpu-detail').textContent = `${cpu.core_count} cores`;
-            document.getElementById('cpu-progress').style.width = `${cpu.cpu_usage}%`;
-        }
-        
-        // Update disk stats if available (use first disk)
-        if (disks.status === 'fulfilled' && disks.value.length > 0) {
-            const diskData = disks.value;
-            console.log('Disks:', diskData);
-            const mainDisk = diskData[0];
-            const diskPercent = (mainDisk.used_space / mainDisk.total_space * 100).toFixed(1);
-            document.getElementById('disk-usage').textContent = `${diskPercent}%`;
-            document.getElementById('disk-detail').textContent = 
-                `${formatBytes(mainDisk.used_space)} / ${formatBytes(mainDisk.total_space)}`;
-            document.getElementById('disk-progress').style.width = `${diskPercent}%`;
-        }
-        
-        // Update system info if available
-        if (systemInfo.status === 'fulfilled') {
-            const sysInfo = systemInfo.value;
-            console.log('System info:', sysInfo);
-            document.getElementById('uptime').textContent = formatUptime(sysInfo.uptime);
+
+        if (systemInfoResult.status === 'fulfilled') {
+            const sysInfo = systemInfoResult.value;
             document.getElementById('system-info').textContent = sysInfo.os_name;
             document.getElementById('os-version').textContent = sysInfo.os_version;
             document.getElementById('hostname').textContent = sysInfo.hostname;
-            document.getElementById('boot-time').textContent = 
-                new Date(sysInfo.boot_time * 1000).toLocaleString();
+            if (bootTimeOverride === null) {
+                document.getElementById('uptime').textContent = formatUptime(sysInfo.uptime);
+            }
+            const bootSeconds = bootTimeOverride ?? sysInfo.boot_time;
+            document.getElementById('boot-time').textContent =
+                new Date(bootSeconds * 1000).toLocaleString();
+        } else if (systemInfoResult.status === 'rejected') {
+            console.error('System info failed:', systemInfoResult.reason);
         }
-        
+
     } catch (error) {
         console.error('Error loading dashboard:', error);
         showNotification('Failed to load dashboard data', 'error');
@@ -351,15 +368,21 @@ async function loadDashboard() {
 // Memory management functions
 async function loadMemoryInfo() {
     try {
-        // Use unified memory stats for accuracy across UI and results
-        const stats = await invoke('get_memory_stats');
+        const snapshot = await invoke('get_metrics_snapshot');
+        const envelope = snapshot.memory;
+        if (!envelope || !envelope.value) {
+            const reason = envelope?.error || 'memory metrics unavailable';
+            throw new Error(reason);
+        }
+
+        const stats = envelope.value;
         const usedRatio = stats.total > 0 ? (stats.used / stats.total) : 0;
         
         document.getElementById('total-memory').textContent = formatBytes(stats.total);
         document.getElementById('used-memory').textContent = formatBytes(stats.used);
         document.getElementById('available-memory').textContent = formatBytes(stats.available);
-        document.getElementById('memory-pressure').textContent = `${(usedRatio * 100).toFixed(1)}%`;
-        document.getElementById('swap-used').textContent = formatBytes(stats.swap_used);
+        document.getElementById('memory-pressure').textContent = `${stats.pressure_percent.toFixed(1)}% (${stats.pressure_state})`;
+        document.getElementById('swap-used').textContent = `${formatBytes(stats.swap_used)} / ${formatBytes(stats.swap_total)}`;
         
         // Draw memory chart (simple visual representation)
         const canvas = document.getElementById('memory-chart');

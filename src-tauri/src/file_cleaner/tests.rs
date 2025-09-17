@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use super::super::safety;
+    use super::super::safety::{self, RiskLevel};
     use super::super::*;
     use crate::file_cleaner::{enhanced_rules, types};
     use std::fs;
@@ -15,7 +15,8 @@ mod tests {
         let file_path = tmp_path.join("scratch.tmp");
         fs::write(&file_path, b"temp").unwrap();
 
-        assert!(safety::is_safe_to_delete(&file_path));
+        let assessment = safety::assess_path_risk(&file_path);
+        assert_eq!(assessment.level, RiskLevel::Safe);
     }
 
     #[test]
@@ -26,7 +27,20 @@ mod tests {
         let file_path = docs_path.join("report.pdf");
         fs::write(&file_path, b"report").unwrap();
 
-        assert!(!safety::is_safe_to_delete(&file_path));
+        let assessment = safety::assess_path_risk(&file_path);
+        assert_eq!(assessment.level, RiskLevel::Risky);
+    }
+
+    #[test]
+    fn test_incomplete_download_risk_assessment() {
+        let temp_dir = TempDir::new().unwrap();
+        let downloads = temp_dir.path().join("Downloads");
+        fs::create_dir_all(&downloads).unwrap();
+        let file_path = downloads.join("unfinished.crdownload");
+        fs::write(&file_path, b"partial").unwrap();
+
+        let assessment = safety::assess_path_risk(&file_path);
+        assert_eq!(assessment.level, RiskLevel::Safe);
     }
 
     // Test Safety Analyzer

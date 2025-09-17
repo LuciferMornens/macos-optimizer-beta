@@ -39,6 +39,7 @@ lazy_static = "1.4"
 num_cpus = "1.16"
 regex = "1.10"
 sha2 = "0.10"
+log = "0.4"
 
 [dev-dependencies]
 tempfile = "3.8"

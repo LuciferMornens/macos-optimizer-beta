@@ -127,11 +127,13 @@ impl FileMetadataCache {
 
         // Fetch metadata
         if let Ok(metadata) = fs::metadata(path) {
+            let risk = super::safety::assess_path_risk(path);
+            let is_safe = matches!(risk.level, super::safety::RiskLevel::Safe);
             let cached = CachedMetadata {
                 size: metadata.len(),
                 modified: metadata.modified().ok()?,
-                is_safe: super::safety::is_safe_to_delete(path),
-                safety_score: super::safety::calculate_safety_score(path, "", None, true).0,
+                is_safe,
+                safety_score: super::safety::calculate_safety_score(path, "", &risk, None).0,
                 cached_at: Instant::now(),
             };
 

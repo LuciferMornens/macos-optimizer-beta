@@ -90,23 +90,3 @@ pub fn extract_sysctl_value(key: &str) -> Option<u64> {
         None
     }
 }
-
-pub fn extract_swap_used() -> u64 {
-    let output = Command::new("sysctl").arg("vm.swapusage").output().ok();
-
-    if let Some(output) = output {
-        if output.status.success() {
-            let output_str = String::from_utf8_lossy(&output.stdout);
-            // Parse: vm.swapusage: total = X M  used = Y M  free = Z M
-            if let Some(used_pos) = output_str.find("used = ") {
-                let used_str = &output_str[used_pos + 7..];
-                if let Some(m_pos) = used_str.find('M') {
-                    if let Ok(used_mb) = used_str[..m_pos].trim().parse::<f64>() {
-                        return (used_mb * 1024.0 * 1024.0) as u64;
-                    }
-                }
-            }
-        }
-    }
-    0
-}

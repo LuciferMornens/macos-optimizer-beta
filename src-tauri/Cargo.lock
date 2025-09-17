@@ -2068,6 +2068,7 @@ dependencies = [
  "futures",
  "lazy_static",
  "libc",
+ "log",
  "lru",
  "num_cpus",
  "rayon",
