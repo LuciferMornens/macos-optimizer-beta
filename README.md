@@ -1,188 +1,104 @@
 # macOS Optimizer
 
-A powerful, native macOS optimization application built with Rust and Tauri. This app helps you optimize RAM usage, clean unnecessary files, and monitor system performance with a beautiful, modern interface.
+macOS Optimizer is a native-feeling desktop utility built with Tauri 2 and Rust that helps keep Macs responsive. It combines a real-time telemetry stack, a memory optimisation pipeline, and a safety-first storage cleaner behind a lightweight JavaScript UI.
 
-## Features
+## Highlights
+- **Real-time telemetry** – a background sampler gathers CPU, memory, disk, and uptime data using native Mach/sysinfo calls and exposes consistent metrics to the dashboard and CLI commands.
+- **Memory optimisation modes** – run safe, non-admin cleanups (inactive pages, caches, compression tuning) or escalate to an admin workflow that executes a hardened maintenance script.
+- **Storage cleaner with risk scoring** – adaptive rules classify caches, logs, temporary items, developer artefacts, and downloads so you can review, auto-select, and purge confidently.
+- **Operations built for trust** – progress events, cancellable queues, and structured notifications keep users informed while long-running optimisations execute in parallel.
+- **macOS-first safety** – every destructive action is guard-railed: files are moved to the Trash, protected paths are skipped, and system-level tweaks fall back gracefully if APIs fail.
 
-### 🚀 System Optimization
-- **RAM Management**: Real-time memory monitoring and optimization
-- **Memory Pressure Relief**: Advanced memory compression and cache purging
-- **Process Management**: View and manage running processes
+## Architecture
+- **Frontend (`src/`)** – Vanilla ES modules drive the WebView UI (dashboard, memory, storage). A thin `operationQueue` serialises backend calls, and toast/confirm helpers deliver native-feeling UX.
+- **Backend (`src-tauri/`)** – Rust modules expose Tauri commands:
+  - `metrics/` owns the background sampler and snapshot types.
+  - `memory_optimizer/` orchestrates non-admin and admin optimise flows plus rich stats.
+  - `file_cleaner/` performs scanning, scoring, and cleanup with cancel support.
+  - `ops/` tracks long-lived operations, throttles concurrency, and emits progress events.
+- **Docs (`docs/`)** – product requirements and design notes (e.g., telemetry PRD) live here.
 
-### 🗑️ Storage Cleaner
-- **Smart File Detection**: Automatically identifies cleanable files
-- **Safe Cleaning**: Protects important system and user files
-- **Categories**:
-  - System and browser caches
-  - Old downloads
-  - Temporary files
-  - Development caches (Xcode, npm, pip, Homebrew)
-  - Trash management
+## Prerequisites
+- macOS 12 Monterey or later (Intel or Apple Silicon).
+- [Node.js](https://nodejs.org/) 18+ with npm (Tauri CLI requires modern Node).
+- [Rust toolchain](https://rustup.rs/) (stable channel). `rustup` installs automatically via Tauri if missing.
+- Xcode Command Line Tools (`xcode-select --install`) so codesign and system headers are available.
 
-### 📊 System Monitoring
-- **Real-time Dashboard**: Live system statistics
-- **CPU Monitoring**: Track CPU usage and performance
-- **Disk Usage**: Monitor storage space
-- **System Information**: Detailed hardware and OS information
-
-### 🎨 Modern UI
-- **Native macOS Design**: Follows Apple's design guidelines
-- **Dark/Light Mode**: Automatic theme switching
-- **Responsive Layout**: Clean and intuitive interface
-
-## Installation
-
-### Prerequisites
-- macOS 10.15 or later
-- Node.js 16+ and npm
-- Rust (will be installed automatically if needed)
-
-### Development Setup
-
-1. Clone the repository:
+## Getting Started
 ```bash
+# Clone the repository
 git clone https://github.com/yourusername/macos-optimizer.git
 cd macos-optimizer
-```
 
-2. Install dependencies:
-```bash
+# Install JS dependencies and the Tauri CLI
 npm install
+
+# Start the development build (disables noisy OS_ACTIVITY logs by default)
+npm run dev
 ```
+This spins up Vite+Tauri in "dev" mode: the Rust backend recompiles on change and the WebView hot-reloads.
 
-3. Run in development mode:
+## Building a Release
 ```bash
-npm run tauri dev
-```
+# Option 1: via package script
+npm run build
 
-### Building for Production
-
-1. Make the build script executable:
-```bash
-chmod +x build.sh
-```
-
-2. Run the build script:
-```bash
+# Option 2: helper script (wraps the command above)
 ./build.sh
 ```
+The signed `.app` bundle lands in `src-tauri/target/release/bundle/macos/`. Drag it to `/Applications` to install.
 
-3. The built application will be available in:
-```
-src-tauri/target/release/bundle/macos/macOS Optimizer.app
-```
+## Key Workflows
+### Dashboard & Telemetry
+- `MetricsSampler` polls Mach APIs (`host_statistics64`, `sysinfo`) on staged cadences (1s CPU/uptime, 5s memory, 30s disk).
+- Snapshots include freshness metadata, collection latency, and error state so the UI can surface stale or degraded metrics.
+- `get_metrics_snapshot` powers the dashboard and memory panel; `get_system_info` augments it with OS metadata.
 
-4. Drag the app to your Applications folder to install.
-
-## Usage
-
-### Dashboard
-The main dashboard provides an overview of your system's current state:
-- Memory usage and pressure
-- CPU utilization
-- Disk space
-- System uptime
-
-Click "Quick Optimize" for one-click optimization.
-
-### Memory Management
-Navigate to the Memory tab to:
-- View detailed memory statistics
-- Optimize memory with advanced techniques
-- Clear inactive memory
-- Monitor swap usage
+### Memory Optimiser
+- **Quick optimise** (`optimize_memory`) runs in parallel: clears inactive pages, trims caches, triggers GC hooks, and respects cancellation tokens.
+- **Admin optimise** (`optimize_memory_admin`) prompts for credentials then executes a curated maintenance script (swap purge, DNS flush, etc.) via safe subprocess orchestration.
+- `MemoryOptimizer::get_memory_stats` now reuses the sampler’s Mach-backed stats with a `vm_stat` fallback for resilience.
 
 ### Storage Cleaner
-In the Storage tab:
-1. Click "Scan System" to identify cleanable files
-2. Review the files by category
-3. Select files to clean
-4. Click "Clean Selected" to free up space
+- Enhanced scans (`scan_cleanable_files_enhanced`) walk caches, downloads, logs, and developer tool artefacts via `walkdir` and heuristics.
+- Every candidate receives a safety grade; risky items are opt-in and always routed through the Trash.
+- Progress events keep the UI responsive during multi-stage scans, and a preview endpoint lets users inspect the generated cleanup plan.
 
-### Process Manager
-The Processes tab allows you to:
-- View all running processes
-- Sort by CPU or memory usage
-- Search for specific processes
-- Terminate unresponsive processes
+### Processes & System Tools
+- View top memory consumers, kill runaway PIDs, inspect network/temperature telemetry, and clear inactive RAM directly from the UI.
+- Operations are registered with `OperationRegistry`, providing cancellation handles, throttling, and consistent progress telemetry for front-end consumers.
 
-## Technical Details
+## Development Notes
+- **Project layout**
+  - `src/` – UI scripts, styles, and components.
+  - `src-tauri/src/metrics/` – telemetry sampler, snapshot structs, async runtime bootstrap.
+  - `src-tauri/src/memory_optimizer/` – non/admin optimisations and stats helpers.
+  - `src-tauri/src/file_cleaner/` – scanning engines, rule engines, and tests.
+  - `docs/` – product specs and improvement logs.
+- **Logging** – enable detailed backend logs with `RUST_LOG=debug npm run dev`.
+- **Environment** – most commands are macOS-specific; running on other platforms is not supported.
 
-### Architecture
-- **Frontend**: Vanilla JavaScript with modern ES6+
-- **Backend**: Rust with Tauri framework
-- **System Integration**: Native macOS APIs via sysinfo crate
+## Testing
+```bash
+# Run the full Rust test suite (macOS only)
+cargo test
 
-### Key Technologies
-- **Tauri**: Cross-platform desktop app framework
-- **Rust**: Systems programming for performance
-- **sysinfo**: System information gathering
-- **walkdir**: Efficient file system traversal
-- **libc**: Low-level system calls
-
-### Security
-- Sandboxed application environment
-- Safe file deletion with trash support
-- Protected system files cannot be deleted
-- Memory optimization uses safe techniques
-
-## Safety Features
-
-The app includes multiple safety mechanisms:
-- **Protected Files**: Never deletes critical system files
-- **Trash Support**: Files are moved to trash, not permanently deleted
-- **Confirmation Dialogs**: Requires user confirmation for destructive actions
-- **Safe Memory Management**: Uses macOS-approved optimization techniques
-
-## Performance
-
-- **Low Resource Usage**: Minimal CPU and memory footprint
-- **Fast Scanning**: Efficient file system traversal
-- **Real-time Updates**: Live system statistics without performance impact
-- **Native Performance**: Rust backend ensures optimal speed
+# Smoke-test the telemetry stack
+cargo test metrics::tests::sampler_emits_recent_snapshot
+```
+Some cleaner tests assert against macOS directory conventions; ensure you run them on a development machine with typical user folders available.
 
 ## Troubleshooting
-
-### Common Issues
-
-1. **Permission Errors**: Some operations may require administrator privileges
-2. **Build Errors**: Ensure you have the latest Xcode Command Line Tools
-3. **Memory Optimization Limited**: Some features work better with sudo access
-
-### Debug Mode
-
-Run with debug logging:
-```bash
-RUST_LOG=debug npm run tauri dev
-```
+- **Build fails / codesign errors** – confirm Xcode Command Line Tools are installed and that you’ve accepted the license (`sudo xcodebuild -license`).
+- **Admin optimise prompts repeatedly** – advanced maintenance steps require an unlocked keychain and admin rights; cancel the flow if elevated access is unavailable.
+- **Slow scans on first run** – caches rebuild rule metadata; subsequent scans reuse warmed data.
+- **Verbose OS logging** – override `OS_ACTIVITY_MODE` if you need raw system logs: `OS_ACTIVITY_MODE=default npm run dev`.
 
 ## Contributing
-
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Open a Pull Request
-
-## License
-
-MIT License - See LICENSE file for details
-
-## Acknowledgments
-
-- Built with [Tauri](https://tauri.app/)
-- System information via [sysinfo](https://github.com/GuillaumeGomez/sysinfo)
-- Icons and design inspired by macOS Big Sur
-
-## Disclaimer
-
-This application modifies system files and processes. While safety measures are in place, use at your own risk. Always ensure you have backups of important data before cleaning files or optimizing memory.
-
-## Support
-
-For issues, questions, or suggestions, please open an issue on GitHub.
+Issues and pull requests are welcome. Please:
+1. Target feature branches and keep PRs focused.
+2. Run `cargo fmt` / `cargo test` before submitting.
+3. Note any UI-visible changes so screenshots/docs stay current.
 
 ---
-
-Made with ❤️ for macOS
+macOS Optimizer is macOS-only free software. Use responsibly—always review the cleanup plan before deleting files.
