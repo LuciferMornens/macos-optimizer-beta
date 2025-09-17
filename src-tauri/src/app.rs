@@ -1,12 +1,18 @@
+use crate::file_cleaner::enhanced_engine::{CleaningResult, DeletionPreparation};
+use crate::file_cleaner::smart_cache::AppActivityChecker;
+use crate::file_cleaner::telemetry::TelemetrySnapshot;
 use crate::file_cleaner::{
-    CleanableFile, CleaningReport, EnhancedCleaningReport, EnhancedDeletionProgress,
-    EnhancedFileCleaner, FileCleaner, UserAction,
+    CleanableFile, CleaningReport, DryRunReport, EnhancedCleaningReport, EnhancedDeletionProgress,
+    EnhancedFileCleaner, FileCleaner, RuleConflict, UserAction,
 };
 use crate::memory_optimizer::{MemoryOptimizationResult, MemoryOptimizer};
 use crate::metrics::MemoryStats;
 use crate::metrics::{CpuSnapshot, DiskSnapshot, MetricsSampler, MetricsSnapshot, SampleEnvelope};
-use crate::ops::{OperationKind, OperationRegistry, ThroughputTracker};
-use crate::system_info::{CpuInfo, DiskInfo, MemoryInfo, ProcessInfo, SystemInfo, SystemMonitor};
+use crate::ops::{OpState, OperationKind, OperationRegistry, ThroughputTracker};
+use crate::system_info::{
+    CpuInfo, DiskInfo, MemoryInfo, NetworkInfo, ProcessInfo, SystemInfo, SystemMonitor,
+    TemperatureInfo,
+};
 
 use crate::file_cleaner::{load_rules_result, DynamicRuleEngine, RuleValidator};
 use serde::Serialize;
@@ -471,7 +477,7 @@ async fn clean_files_enhanced(
     state: State<'_, AppState>,
     file_paths: Vec<String>,
     allow_low_safety: Option<bool>,
-) -> Result<file_cleaner::enhanced_engine::CleaningResult, String> {
+) -> Result<CleaningResult, String> {
     let (operation_id, token) = state.ops.register(OperationKind::FileClean, true);
     app_handle
         .emit(
@@ -593,7 +599,7 @@ async fn clean_files_enhanced(
 async fn prepare_deletion_enhanced(
     state: State<'_, AppState>,
     file_paths: Vec<String>,
-) -> Result<file_cleaner::enhanced_engine::DeletionPreparation, String> {
+) -> Result<DeletionPreparation, String> {
     let mut cleaner = state.enhanced_file_cleaner.write().await;
     cleaner.prepare_deletion_by_paths(&file_paths).await
 }
@@ -620,13 +626,12 @@ async fn record_user_feedback(
 #[tauri::command]
 async fn get_active_development_tools(_state: State<'_, AppState>) -> Result<Vec<String>, String> {
     // This provides information about active development tools
-    let checker = file_cleaner::smart_cache::AppActivityChecker::new();
+    let checker = AppActivityChecker::new();
     Ok(checker.get_active_development_tools())
 }
 
 #[tauri::command]
-async fn preview_rules(
-) -> Result<(Vec<file_cleaner::RuleConflict>, file_cleaner::DryRunReport), String> {
+async fn preview_rules() -> Result<(Vec<RuleConflict>, DryRunReport), String> {
     let base = load_rules_result()?;
     let dyn_eng = DynamicRuleEngine::new();
     let mut adapted = dyn_eng.adapt_rules_to_system(&base);
@@ -639,9 +644,7 @@ async fn preview_rules(
 }
 
 #[tauri::command]
-async fn get_enhanced_telemetry(
-    state: State<'_, AppState>,
-) -> Result<file_cleaner::telemetry::TelemetrySnapshot, String> {
+async fn get_enhanced_telemetry(state: State<'_, AppState>) -> Result<TelemetrySnapshot, String> {
     let cleaner = state.enhanced_file_cleaner.read().await;
     Ok(cleaner.telemetry_snapshot())
 }
@@ -1134,22 +1137,18 @@ async fn cancel_operation(state: State<'_, AppState>, operation_id: String) -> R
 async fn get_operation_state(
     state: State<'_, AppState>,
     operation_id: String,
-) -> Result<Option<ops::OpState>, String> {
+) -> Result<Option<OpState>, String> {
     Ok(state.ops.get(&operation_id))
 }
 
 #[tauri::command]
-async fn get_network_info(
-    state: State<'_, AppState>,
-) -> Result<Vec<system_info::NetworkInfo>, String> {
+async fn get_network_info(state: State<'_, AppState>) -> Result<Vec<NetworkInfo>, String> {
     let monitor = state.system_monitor.read().await;
     Ok(monitor.get_network_info())
 }
 
 #[tauri::command]
-async fn get_temperatures(
-    state: State<'_, AppState>,
-) -> Result<Vec<system_info::TemperatureInfo>, String> {
+async fn get_temperatures(state: State<'_, AppState>) -> Result<Vec<TemperatureInfo>, String> {
     let monitor = state.system_monitor.read().await;
     Ok(monitor.get_temperatures())
 }
