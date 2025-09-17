@@ -2,6 +2,52 @@ use chrono::{DateTime, Utc};
 use std::fs;
 use std::path::Path;
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SafetyPolicy {
+    pub auto_select_threshold: u8,
+    pub direct_delete_threshold: u8,
+    pub max_auto_select_size: Option<u64>,
+}
+
+impl SafetyPolicy {
+    const fn disabled() -> Self {
+        SafetyPolicy { auto_select_threshold: 255, direct_delete_threshold: 100, max_auto_select_size: None }
+    }
+}
+
+pub(crate) fn policy_for_category(category: &str) -> SafetyPolicy {
+    let c = category.to_lowercase();
+    // Always safe/auto buckets
+    if c == "trash" {
+        return SafetyPolicy { auto_select_threshold: 0, direct_delete_threshold: 95, max_auto_select_size: None };
+    }
+    if c.contains("cache") || c.contains("temporary files") || c.contains("user temporary files") || c.contains("container temp") {
+        return SafetyPolicy { auto_select_threshold: 90, direct_delete_threshold: 95, max_auto_select_size: None };
+    }
+    if c == "incomplete downloads (2d+)" {
+        return SafetyPolicy { auto_select_threshold: 90, direct_delete_threshold: 95, max_auto_select_size: None };
+    }
+    if c.contains("saved application state") {
+        return SafetyPolicy { auto_select_threshold: 90, direct_delete_threshold: 95, max_auto_select_size: None };
+    }
+    if c.contains("logs") || c.contains("crash reports") {
+        return SafetyPolicy { auto_select_threshold: 80, direct_delete_threshold: 95, max_auto_select_size: None };
+    }
+    // Review-only buckets: never auto-select by policy
+    if c.contains("old downloads")
+        || c.contains("large stale files")
+        || c.contains("mail downloads")
+        || c.contains("messages attachments")
+        || c.contains("ios updates")
+        || c.contains("ios backups")
+        || c.contains("app support caches (advanced)")
+    {
+        return SafetyPolicy::disabled();
+    }
+    // Default: conservative, no auto-select via policy
+    SafetyPolicy::disabled()
+}
+
 pub(crate) fn is_safe_to_delete(path: &Path) -> bool {
     // Be conservative: only return true for well-known safe locations/types.
     // Everything else requires explicit user review (return false).
@@ -363,10 +409,13 @@ pub(crate) fn calculate_safety_score(
                 }
             }
 
-            // Decrease safety for recently modified files
+            // Decrease safety for recently modified files (but do NOT penalize incomplete downloads)
             if age_days < 7 && score > 50 {
-                score = score.saturating_sub(20);
-                auto_select = false;
+                let name_lower = category.to_lowercase();
+                if name_lower != "incomplete downloads (2d+)" {
+                    score = score.saturating_sub(20);
+                    auto_select = false;
+                }
             }
         }
     }
@@ -375,6 +424,7 @@ pub(crate) fn calculate_safety_score(
     if let Ok(metadata) = fs::metadata(path) {
         let size = metadata.len();
         // Don't auto-select very large files (>500MB) unless they're in clearly safe buckets
+        // Exempt incomplete downloads bucket
         if size > 500 * 1024 * 1024
             && !matches!(
                 category,
@@ -390,6 +440,7 @@ pub(crate) fn calculate_safety_score(
                     | "Container Caches (Advanced)"
                     | "Container Temp (Advanced)"
                     | "Group Container Caches (Advanced)"
+                    | "Incomplete Downloads (2d+)"
             )
         {
             auto_select = false;

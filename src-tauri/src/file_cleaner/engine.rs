@@ -312,7 +312,7 @@ impl FileCleaner {
                         }
                     }
 
-                    let dir_size = self.get_directory_size(file_path).unwrap_or(0);
+                    let dir_size = self.get_directory_size_blocking(file_path).unwrap_or(0);
                     let min_size = min_size_bytes_from_rule.unwrap_or(0);
                     if dir_size < min_size {
                         continue;
@@ -524,7 +524,7 @@ impl FileCleaner {
 
             // Get size before deletion (directories need recursive sizing)
             let item_size = if is_dir {
-                self.get_directory_size(path).unwrap_or(0)
+                self.get_directory_size_async(path).await.unwrap_or(0)
             } else {
                 match fs::metadata(path) {
                     Ok(m) => m.len(),
@@ -751,7 +751,7 @@ impl FileCleaner {
             return Ok((0, 0));
         }
 
-        let size_before = self.get_directory_size(&trash_dir).unwrap_or(0);
+        let size_before = self.get_directory_size_async(&trash_dir).await.unwrap_or(0);
         let count_before = fs::read_dir(&trash_dir)
             .map(|entries| entries.count())
             .unwrap_or(0);
@@ -794,7 +794,7 @@ impl FileCleaner {
         sleep(Duration::from_millis(500)).await;
 
         // Calculate freed space
-        let size_after = self.get_directory_size(&trash_dir).unwrap_or(0);
+        let size_after = self.get_directory_size_async(&trash_dir).await.unwrap_or(0);
         let count_after = fs::read_dir(&trash_dir)
             .map(|entries| entries.count())
             .unwrap_or(0);
@@ -833,9 +833,9 @@ impl FileCleaner {
         Ok((freed, removed))
     }
 
-    pub(crate) fn get_directory_size(&self, path: &Path) -> Result<u64, String> {
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.block_on(DIR_SIZE_CACHE.get_or_calculate(path, |p| {
+    pub async fn get_directory_size_async(&self, path: &Path) -> Result<u64, String> {
+        DIR_SIZE_CACHE
+            .get_or_calculate(path, |p| {
                 let mut total = 0u64;
                 for entry in WalkDir::new(p).into_iter().filter_map(|e| e.ok()) {
                     if entry.file_type().is_file() {
@@ -845,19 +845,21 @@ impl FileCleaner {
                     }
                 }
                 Ok(total)
-            }))
-        } else {
-            // Fallback synchronous calculation when no Tokio runtime is available
-            let mut total = 0u64;
-            for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
-                if entry.file_type().is_file() {
-                    if let Ok(md) = fs::metadata(entry.path()) {
-                        total += md.len();
-                    }
+            })
+            .await
+    }
+
+    pub(crate) fn get_directory_size_blocking(&self, path: &Path) -> Result<u64, String> {
+        // Synchronous calculation without touching the async runtime (safe in rayon/scan contexts)
+        let mut total = 0u64;
+        for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+            if entry.file_type().is_file() {
+                if let Ok(md) = fs::metadata(entry.path()) {
+                    total += md.len();
                 }
             }
-            Ok(total)
         }
+        Ok(total)
     }
 
     pub fn get_auto_selectable_files(&self) -> Vec<CleanableFile> {

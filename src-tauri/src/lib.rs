@@ -348,6 +348,15 @@ async fn clean_files_enhanced(
 }
 
 #[tauri::command]
+async fn prepare_deletion_enhanced(
+    state: State<'_, AppState>,
+    file_paths: Vec<String>
+) -> Result<file_cleaner::enhanced_engine::DeletionPreparation, String> {
+    let mut cleaner = state.enhanced_file_cleaner.write().await;
+    cleaner.prepare_deletion_by_paths(&file_paths).await
+}
+
+#[tauri::command]
 async fn record_user_feedback(
     state: State<'_, AppState>,
     file_path: String,
@@ -441,6 +450,40 @@ async fn empty_trash(app_handle: tauri::AppHandle, state: State<'_, AppState>) -
     app_handle.emit("operation:complete", OperationCompleteEvent { operation_id: operation_id.clone(), success: res.is_ok() && !canceled, message: if canceled { "Trash empty canceled".into() } else { "Trash emptied".into() }, duration: 0, canceled: Some(canceled) }).ok();
     if canceled { state.ops.finish_canceled(&operation_id); } else if res.is_ok() { state.ops.finish_success(&operation_id); } else { state.ops.finish_failed(&operation_id, "empty_trash failed"); }
     res
+}
+
+#[tauri::command]
+async fn restore_from_trash(_app_handle: tauri::AppHandle, _state: State<'_, AppState>, file_names: Vec<String>) -> Result<usize, String> {
+    // Naive restore: move files from ~/.Trash back to user's Downloads directory
+    // This can be enhanced later to track original locations from recovery metadata
+    let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
+    let trash = home.join(".Trash");
+    let downloads = home.join("Downloads");
+    let mut restored = 0usize;
+
+    for name in file_names {
+        let src = trash.join(&name);
+        if !src.exists() { continue; }
+        let mut target = downloads.join(&name);
+        // Ensure unique name
+        let mut counter = 1u32;
+        while target.exists() {
+            let (base, ext) = {
+                if let Some(idx) = name.rfind('.') {
+                    let (b, e) = name.split_at(idx);
+                    (b.to_string(), e.trim_start_matches('.').to_string())
+                } else {
+                    (name.clone(), String::new())
+                }
+            };
+            let candidate = if ext.is_empty() { format!("{} (restored-{})", base, counter) } else { format!("{} (restored-{}).{}", base, counter, ext) };
+            target = downloads.join(candidate);
+            counter += 1;
+        }
+        if std::fs::rename(&src, &target).is_ok() { restored += 1; }
+    }
+
+    Ok(restored)
 }
 
 #[tauri::command]
@@ -752,11 +795,13 @@ pub fn run() {
             get_files_by_safety,
             clean_files,
             clean_files_enhanced,
+            prepare_deletion_enhanced,
             preview_rules,
             get_enhanced_telemetry,
             record_user_feedback,
             get_active_development_tools,
             empty_trash,
+            restore_from_trash,
             optimize_memory,
             optimize_memory_admin,
             clear_inactive_memory,

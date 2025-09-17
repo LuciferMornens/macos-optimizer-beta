@@ -75,7 +75,7 @@ impl super::engine::FileCleaner {
         
         // Size filter
         let size = if metadata.is_dir() {
-            self.get_directory_size(file_path).unwrap_or(0)
+            self.get_directory_size_blocking(file_path).unwrap_or(0)
         } else {
             metadata.len()
         };

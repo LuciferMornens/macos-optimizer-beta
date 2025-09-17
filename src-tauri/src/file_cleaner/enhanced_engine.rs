@@ -3,9 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 
 use super::types::{CleanableFile, CleaningReport, CategoryReport, load_rules_result};
+use super::safety::policy_for_category;
 use super::advanced_safety::{SafetyAnalyzer, SafetyMetrics, SafetyRecommendation};
 use super::smart_cache::{SmartCacheDetector, CacheValidation, DuplicateDetector, DuplicateGroup};
 use super::validation::{PreDeletionValidator, RecoveryManager, ValidationResult, FileValidationState};
@@ -15,6 +17,7 @@ use super::enhanced_rules::{DynamicRuleEngine, RuleValidator};
 use super::telemetry::{SafetyMetricsCollector, TelemetrySnapshot};
 use tokio_util::sync::CancellationToken;
 use super::cache::DIR_SIZE_CACHE;
+use dirs;
 
 /// Enhanced file cleaner with all safety features
 pub struct EnhancedFileCleaner {
@@ -49,6 +52,20 @@ impl EnhancedFileCleaner {
             duplicate_detector: DuplicateDetector::new(),
             telemetry: SafetyMetricsCollector::new(),
         }
+    }
+
+    /// Prepare deletion by filtering currently scanned files with provided paths.
+    pub async fn prepare_deletion_by_paths(
+        &mut self,
+        file_paths: &[String],
+    ) -> Result<DeletionPreparation, String> {
+        let files_to_clean: Vec<EnhancedCleanableFile> = self
+            .cleanable_files
+            .iter()
+            .filter(|f| file_paths.contains(&f.base.path))
+            .cloned()
+            .collect();
+        self.validate_and_prepare_deletion(&files_to_clean).await
     }
 
     /// Enhanced system scan with multi-layer safety analysis (cancellable)
@@ -143,6 +160,17 @@ impl EnhancedFileCleaner {
             );
             file.base.safety_score = file.safety_metrics.base_score;
             file.base.auto_select = file.auto_select_score.can_auto_select;
+
+            // Enforce policy gates (auto-select threshold, never-auto), without overriding hard blocks
+            let policy = policy_for_category(&file.base.category);
+            if policy.auto_select_threshold < 255 {
+                let meets_threshold = file.base.safety_score >= policy.auto_select_threshold;
+                // If policy requires threshold; only auto-select when reached
+                file.base.auto_select = file.base.auto_select && meets_threshold;
+            } else {
+                // Disabled policy buckets: do not auto-select
+                file.base.auto_select = false;
+            }
         }
 
         if let Some(cb) = progress { cb(90.0, "Scoring and summarizing", "scoring"); }
@@ -366,11 +394,11 @@ impl EnhancedFileCleaner {
                 continue;
             }
 
-            // Attempt deletion (prefer Trash)
+            // Attempt deletion (prefer Trash). Only direct-delete when extremely safe
             let deleted = if self.move_to_trash(&path).await {
                 true
-            } else if file.safety_metrics.base_score >= 90 {
-                // Only attempt direct deletion for very safe files
+            } else if file.safety_metrics.base_score >= 95 {
+                // Only attempt direct deletion for extremely safe files
                 fs::remove_file(&path).is_ok() || fs::remove_dir_all(&path).is_ok()
             } else {
                 false
@@ -401,20 +429,61 @@ impl EnhancedFileCleaner {
     }
 
     async fn move_to_trash(&self, path: &Path) -> bool {
-        // Use native macOS trash command
+        // Prefer Finder deletion (moves to Trash per-volume)
         if let Ok(output) = tokio::process::Command::new("osascript")
             .arg("-e")
             .arg(format!(
-                "tell application \"Finder\" to delete POSIX file \"{}\"",
+                "tell application \"Finder\" to move POSIX file \"{}\" to trash",
                 path.display()
             ))
             .output()
             .await
         {
-            return output.status.success();
+            if output.status.success() {
+                return true;
+            }
         }
-        
+
+        // Fallback: rename into ~/.Trash with unique name
+        if let Some(home) = dirs::home_dir() {
+            let trash = home.join(".Trash");
+            if trash.exists() || std::fs::create_dir_all(&trash).is_ok() {
+                if let Some(name) = path.file_name() {
+                    let mut target = trash.join(name);
+                    if target.exists() {
+                        let stem = name.to_string_lossy().to_string();
+                        let (base, ext) = Self::split_name_ext_local(&stem);
+                        let ts = Local::now().format("%Y%m%d-%H%M%S").to_string();
+                        let mut counter = 1u32;
+                        loop {
+                            let candidate = if ext.is_empty() {
+                                format!("{} ({}-{})", base, ts, counter)
+                            } else {
+                                format!("{} ({}-{}).{}", base, ts, counter, ext)
+                            };
+                            target = trash.join(candidate);
+                            if !target.exists() { break; }
+                            counter += 1;
+                        }
+                    }
+                    if std::fs::rename(path, &target).is_ok() {
+                        return true;
+                    }
+                }
+            }
+        }
+
         false
+    }
+
+    /// Local helper to split name and extension (avoids referencing private engine helper)
+    fn split_name_ext_local(name: &str) -> (String, String) {
+        if let Some(idx) = name.rfind('.') {
+            let (base, ext) = name.split_at(idx);
+            (base.to_string(), ext.trim_start_matches('.').to_string())
+        } else {
+            (name.to_string(), String::new())
+        }
     }
 
     fn generate_enhanced_report(
