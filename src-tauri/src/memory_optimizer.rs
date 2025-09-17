@@ -3,14 +3,6 @@
 use serde::{Deserialize, Serialize};
 // time helpers imported ad-hoc where needed
 
-#[derive(Debug, Serialize, Clone)]
-pub struct ProgressUpdate {
-    pub operation: String,
-    pub stage: String,
-    pub progress: f32,
-    pub message: String,
-}
-
 // Internal modules backing this facade.
 // Keep this file as the stable entry point that others import.
 mod stats;

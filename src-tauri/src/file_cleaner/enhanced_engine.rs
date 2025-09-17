@@ -163,14 +163,9 @@ impl EnhancedFileCleaner {
 
             // Enforce policy gates (auto-select threshold, never-auto), without overriding hard blocks
             let policy = policy_for_category(&file.base.category);
-            if policy.auto_select_threshold < 255 {
-                let meets_threshold = file.base.safety_score >= policy.auto_select_threshold;
-                // If policy requires threshold; only auto-select when reached
-                file.base.auto_select = file.base.auto_select && meets_threshold;
-            } else {
-                // Disabled policy buckets: do not auto-select
-                file.base.auto_select = false;
-            }
+            // Apply policy guardrails without overriding other subsystems'
+            // decisions beyond the defined safety boundaries.
+            policy.enforce(&mut file.base);
         }
 
         if let Some(cb) = progress { cb(90.0, "Scoring and summarizing", "scoring"); }

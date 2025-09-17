@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use std::fs;
 use std::path::Path;
 
+use super::types::CleanableFile;
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SafetyPolicy {
     pub auto_select_threshold: u8,
@@ -12,6 +14,25 @@ pub(crate) struct SafetyPolicy {
 impl SafetyPolicy {
     const fn disabled() -> Self {
         SafetyPolicy { auto_select_threshold: 255, direct_delete_threshold: 100, max_auto_select_size: None }
+    }
+
+    pub(crate) fn enforce(&self, file: &mut CleanableFile) {
+        if self.auto_select_threshold < 255 {
+            let meets_threshold = file.safety_score >= self.auto_select_threshold;
+            file.auto_select = file.auto_select && meets_threshold;
+        } else {
+            file.auto_select = false;
+        }
+
+        if file.safe_to_delete && file.safety_score < self.direct_delete_threshold {
+            file.safe_to_delete = false;
+        }
+
+        if let Some(max_size) = self.max_auto_select_size {
+            if file.auto_select && file.size > max_size {
+                file.auto_select = false;
+            }
+        }
     }
 }
 

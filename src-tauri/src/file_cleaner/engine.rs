@@ -502,12 +502,15 @@ impl FileCleaner {
         let mut errors = Vec::new();
 
         // Collect items that failed due to permissions to retry once with elevation
+        #[cfg(target_os = "macos")]
         #[derive(Clone)]
         struct PendingElevated {
             path: String,
             size: u64,
             is_dir: bool,
         }
+
+        #[cfg(target_os = "macos")]
         let mut pending_elevated: Vec<PendingElevated> = Vec::new();
 
         for path_str in files {
@@ -572,11 +575,22 @@ impl FileCleaner {
                                 }
                                 PermissionDenied => {
                                     // Queue for a single elevated removal attempt later
-                                    pending_elevated.push(PendingElevated {
-                                        path: path_str.clone(),
-                                        size: item_size,
-                                        is_dir,
-                                    });
+                                    #[cfg(target_os = "macos")]
+                                    {
+                                        pending_elevated.push(PendingElevated {
+                                            path: path_str.clone(),
+                                            size: item_size,
+                                            is_dir,
+                                        });
+                                    }
+
+                                    #[cfg(not(target_os = "macos"))]
+                                    {
+                                        errors.push(format!(
+                                            "Missing permissions to remove {} and elevation is unavailable on this platform",
+                                            path_str
+                                        ));
+                                    }
                                 }
                                 _ => {
                                     errors.push(format!("Failed to remove {}: {}", path_str, e));
