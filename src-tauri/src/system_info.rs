@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use sysinfo::{System, Pid, Networks, Components, Disks};
 use libc::{kill as libc_kill, SIGKILL, SIGTERM};
+use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
+use sysinfo::{Components, Disks, Networks, Pid, System};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemInfo {
@@ -92,7 +92,7 @@ impl SystemMonitor {
     pub fn new() -> Self {
         let mut system = System::new_all();
         system.refresh_all();
-        SystemMonitor { 
+        SystemMonitor {
             system,
             last_full_refresh: Instant::now(),
             last_process_refresh: Instant::now(),
@@ -104,23 +104,23 @@ impl SystemMonitor {
     pub fn refresh(&mut self) {
         self.refresh_selective(RefreshComponent::All);
     }
-    
+
     fn refresh_selective(&mut self, component: RefreshComponent) {
         let now = Instant::now();
-        
+
         match component {
             RefreshComponent::Memory => {
                 if now.duration_since(self.last_memory_refresh) > Duration::from_millis(500) {
                     self.system.refresh_memory();
                     self.last_memory_refresh = now;
                 }
-            },
+            }
             RefreshComponent::Processes => {
                 if now.duration_since(self.last_process_refresh) > Duration::from_secs(1) {
                     self.system.refresh_processes();
                     self.last_process_refresh = now;
                 }
-            },
+            }
             RefreshComponent::All => {
                 if now.duration_since(self.last_full_refresh) > self.refresh_interval {
                     self.system.refresh_all();
@@ -128,7 +128,7 @@ impl SystemMonitor {
                     self.last_process_refresh = now;
                     self.last_memory_refresh = now;
                 }
-            },
+            }
         }
     }
 
@@ -149,7 +149,7 @@ impl SystemMonitor {
         let used_memory = self.system.used_memory();
         let available_memory = self.system.available_memory();
         let free_memory = self.system.free_memory();
-        
+
         let memory_pressure = if total_memory > 0 {
             (used_memory as f32 / total_memory as f32) * 100.0
         } else {
@@ -201,7 +201,7 @@ impl SystemMonitor {
                 let total_space = disk.total_space();
                 let available_space = disk.available_space();
                 let used_space = total_space - available_space;
-                
+
                 DiskInfo {
                     name: disk.name().to_string_lossy().to_string(),
                     mount_point: disk.mount_point().to_string_lossy().to_string(),
@@ -234,9 +234,12 @@ impl SystemMonitor {
         self.refresh_selective(RefreshComponent::Memory);
         let cpus = self.system.cpus();
         let cpu_usage = cpus.iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32;
-        
+
         CpuInfo {
-            brand: cpus.first().map(|c| c.brand().to_string()).unwrap_or_default(),
+            brand: cpus
+                .first()
+                .map(|c| c.brand().to_string())
+                .unwrap_or_default(),
             frequency: cpus.first().map(|c| c.frequency()).unwrap_or(0),
             cpu_usage,
             core_count: cpus.len(),

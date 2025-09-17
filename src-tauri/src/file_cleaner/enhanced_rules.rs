@@ -12,7 +12,9 @@ pub struct DynamicRuleEngine {
 
 impl DynamicRuleEngine {
     pub fn new() -> Self {
-        Self { app_checker: AppActivityChecker::new() }
+        Self {
+            app_checker: AppActivityChecker::new(),
+        }
     }
 
     /// Generate app-specific rules opportunistically. These are conservative and marked safe.
@@ -38,7 +40,11 @@ impl DynamicRuleEngine {
         }
 
         // Node / npm / yarn
-        if lower.contains("node") || lower.contains("npm") || lower.contains("yarn") || lower.contains("pnpm") {
+        if lower.contains("node")
+            || lower.contains("npm")
+            || lower.contains("yarn")
+            || lower.contains("pnpm")
+        {
             rules.push(CategoryRule {
                 name: "Node Package Cache".to_string(),
                 paths: vec!["~/.npm".to_string()],
@@ -54,7 +60,11 @@ impl DynamicRuleEngine {
         }
 
         // Python / pip
-        if lower.contains("python") || lower.contains("python3") || lower.contains("pip") || lower.contains("pip3") {
+        if lower.contains("python")
+            || lower.contains("python3")
+            || lower.contains("pip")
+            || lower.contains("pip3")
+        {
             rules.push(CategoryRule {
                 name: "Pip Cache".to_string(),
                 paths: vec!["~/Library/Caches/pip".to_string()],
@@ -80,7 +90,11 @@ impl DynamicRuleEngine {
                 min_age_days: Some(14),
                 min_size_kb: None,
                 excludes: None,
-                extensions: Some(vec!["crate".to_string(), "tar.gz".to_string(), "tgz".to_string()]),
+                extensions: Some(vec![
+                    "crate".to_string(),
+                    "tar.gz".to_string(),
+                    "tgz".to_string(),
+                ]),
                 require_subpaths: None,
             });
         }
@@ -113,7 +127,9 @@ impl DynamicRuleEngine {
             let filtered_paths: Vec<String> = rule
                 .paths
                 .iter()
-                .filter(|p| p.starts_with("~/") || std::path::Path::new(&Self::expand_home(p)).exists())
+                .filter(|p| {
+                    p.starts_with("~/") || std::path::Path::new(&Self::expand_home(p)).exists()
+                })
                 .cloned()
                 .collect();
 
@@ -155,7 +171,9 @@ impl DynamicRuleEngine {
 pub struct RuleValidator;
 
 impl RuleValidator {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     /// Check for overlapping path coverage and contradictory flags.
     pub fn validate_rule_consistency(&self, rules: &CleanerRules) -> Vec<RuleConflict> {
@@ -163,9 +181,11 @@ impl RuleValidator {
         for (i, a) in rules.categories.iter().enumerate() {
             for (_j, b) in rules.categories.iter().enumerate().skip(i + 1) {
                 // Overlap heuristic: one path is a prefix of another OR names equal
-                let overlap = a.paths.iter().any(|pa| b.paths.iter().any(|pb| {
-                    pa == pb || pa.starts_with(pb) || pb.starts_with(pa)
-                }));
+                let overlap = a.paths.iter().any(|pa| {
+                    b.paths
+                        .iter()
+                        .any(|pb| pa == pb || pa.starts_with(pb) || pb.starts_with(pa))
+                });
                 if overlap && a.safe != b.safe {
                     conflicts.push(RuleConflict::OverlappingPaths {
                         rule_a: a.name.clone(),
@@ -199,7 +219,11 @@ impl RuleValidator {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RuleConflict {
-    OverlappingPaths { rule_a: String, rule_b: String, message: String },
+    OverlappingPaths {
+        rule_a: String,
+        rule_b: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

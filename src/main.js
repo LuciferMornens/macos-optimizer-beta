@@ -110,16 +110,82 @@ function formatUptime(seconds) {
     }
 }
 
-function showNotification(message, type = 'success') {
-    const notification = document.getElementById('notification');
-    const messageElement = notification.querySelector('.notification-message');
-    
-    messageElement.textContent = message;
-    notification.className = `notification show ${type}`;
-    
-    setTimeout(() => {
-        notification.classList.remove('show');
-    }, 3000);
+const TOAST_ICONS = {
+    success: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.6"/><path d="M6 10.5l2.2 2.2 4.4-5.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    error: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.6"/><path d="M7.2 7.2l5.6 5.6M12.8 7.2l-5.6 5.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    warning: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5l7.5 13a1 1 0 0 1-.87 1.5H3.37a1 1 0 0 1-.87-1.5l7.5-13a1 1 0 0 1 1.74 0Z" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M10 7v4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="14.5" r="1" fill="currentColor"/></svg>',
+    info: '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.6"/><path d="M10 8.5v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="6" r="1" fill="currentColor"/></svg>'
+};
+
+function resolveToastIcon(type) {
+    return TOAST_ICONS[type] || TOAST_ICONS.info;
+}
+
+function showNotification(message, type = 'info', options = {}) {
+    const { duration = 4200, dismissible = true } = options;
+    if (!message) return;
+
+    let stack = document.getElementById('toast-stack');
+    if (!stack) {
+        stack = document.createElement('div');
+        stack.id = 'toast-stack';
+        stack.className = 'toast-stack';
+        stack.setAttribute('aria-live', 'polite');
+        stack.setAttribute('aria-atomic', 'true');
+        document.body.appendChild(stack);
+    }
+
+    // Limit number of concurrent toasts to keep UI tidy
+    while (stack.children.length >= 4) {
+        stack.removeChild(stack.firstElementChild);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast--${type}`;
+    toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+
+    const icon = document.createElement('span');
+    icon.className = 'toast__icon';
+    icon.innerHTML = resolveToastIcon(type);
+
+    const body = document.createElement('div');
+    body.className = 'toast__body';
+    body.textContent = message;
+
+    const progress = document.createElement('div');
+    progress.className = 'toast__progress';
+    const bar = document.createElement('span');
+    bar.style.animationDuration = `${Math.max(duration, 0)}ms`;
+    progress.appendChild(bar);
+
+    let closeBtn = null;
+    if (dismissible) {
+        closeBtn = document.createElement('button');
+        closeBtn.className = 'toast__close';
+        closeBtn.type = 'button';
+        closeBtn.setAttribute('aria-label', 'Dismiss notification');
+        closeBtn.textContent = '×';
+    }
+
+    const removeToast = () => {
+        toast.classList.add('toast--exit');
+        toast.addEventListener('animationend', () => toast.remove(), { once: true });
+    };
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => removeToast());
+    }
+
+    toast.append(icon, body);
+    if (closeBtn) {
+        toast.append(closeBtn);
+    }
+    toast.append(progress);
+    stack.appendChild(toast);
+
+    if (duration > 0) {
+        setTimeout(removeToast, duration);
+    }
 }
 
 // Tab navigation - will be set up in DOMContentLoaded
@@ -344,6 +410,11 @@ let cleanableFiles = [];
 let lastReport = null;
 let showAdvanced = false;
 let currentCategoryFilter = null;
+const RISK_MODE_STORAGE_KEY = 'storageCleaner.allowRisky';
+const RISK_DESCRIPTION_DEFAULT = 'Allow manual selection of low-safety items after acknowledging the risks. Files are always moved to the Trash first.';
+const RISK_DESCRIPTION_EMPTY = 'All scanned items are currently considered safe. Risky Mode is optional right now.';
+let allowRiskySelections = false;
+let categorySafetySummary = new Map();
 
 async function scanForCleanableFiles() {
     const scanProgress = document.getElementById('scan-progress');
@@ -361,6 +432,7 @@ async function scanForCleanableFiles() {
                 lastReport = report.base || report;
                 const enhanced = (report.enhanced_files || []).map(f => f.base);
                 cleanableFiles = enhanced && enhanced.length > 0 ? enhanced : await invoke('get_cleanable_files');
+                categorySafetySummary = computeCategorySummaries(cleanableFiles);
                 
                 // Update summary (prefer base fields from enhanced scan)
                 const totalSize = (report && report.base && typeof report.base.total_size === 'number') ? report.base.total_size : (report && typeof report.total_size === 'number') ? report.total_size : 0;
@@ -374,7 +446,10 @@ async function scanForCleanableFiles() {
                 // Display files
                 currentCategoryFilter = null;
                 displayFiles(cleanableFiles);
-                
+
+                const hasRisky = Array.from(categorySafetySummary.values()).some(entry => entry.riskyCount > 0);
+                updateRiskModeBannerState(hasRisky);
+
                 scanProgress.style.display = 'none';
                 cleaningReport.style.display = 'block';
                 cleanButton.disabled = false;
@@ -384,6 +459,8 @@ async function scanForCleanableFiles() {
             } catch (error) {
                 console.error('Error scanning files:', error);
                 showNotification('Failed to scan for cleanable files', 'error');
+                categorySafetySummary = new Map();
+                updateRiskModeBannerState(false);
                 scanProgress.style.display = 'none';
                 throw error;
             }
@@ -396,6 +473,43 @@ async function scanForCleanableFiles() {
             timeout: 30000
         }
     );
+}
+
+function computeCategorySummaries(files) {
+    const summary = new Map();
+    files.forEach(file => {
+        const entry = summary.get(file.category) || { total: 0, safeCount: 0, riskyCount: 0, maxScore: 0 };
+        entry.total += 1;
+        if (file.safe_to_delete) {
+            entry.safeCount += 1;
+        } else {
+            entry.riskyCount += 1;
+        }
+        if (typeof file.safety_score === 'number') {
+            entry.maxScore = Math.max(entry.maxScore, file.safety_score || 0);
+        }
+        summary.set(file.category, entry);
+    });
+    return summary;
+}
+
+function updateRiskModeBannerState(hasRiskyItems) {
+    const banner = document.getElementById('risk-mode-banner');
+    if (!banner) return;
+    banner.classList.toggle('risk-mode-banner--active', allowRiskySelections);
+    banner.classList.toggle('risk-mode-banner--no-risk', !hasRiskyItems);
+    const description = banner.querySelector('.risk-mode-description');
+    if (description) {
+        description.textContent = hasRiskyItems ? RISK_DESCRIPTION_DEFAULT : RISK_DESCRIPTION_EMPTY;
+    }
+    const toggleLabel = banner.querySelector('.risk-mode-toggle-label');
+    if (toggleLabel) {
+        toggleLabel.textContent = allowRiskySelections ? 'Risky mode on' : 'Risky mode off';
+    }
+    const toggleInput = banner.querySelector('#enable-risk-mode');
+    if (toggleInput && toggleInput.checked !== allowRiskySelections) {
+        toggleInput.checked = allowRiskySelections;
+    }
 }
 
 function renderCategories() {
@@ -412,7 +526,8 @@ function renderCategories() {
     lastReport.categories.forEach(category => {
         const isAdvanced = advancedSet.has(category.name.toLowerCase()) || /\(advanced\)/i.test(category.name);
         if (!isAdvanced) {
-            const card = createCategoryCard(category.name, category.size, category.count, false);
+            const summary = categorySafetySummary.get(category.name) || null;
+            const card = createCategoryCard(category.name, category.size, category.count, false, summary);
             categoriesList.appendChild(card);
         }
     });
@@ -422,7 +537,8 @@ function renderCategories() {
         lastReport.categories.forEach(category => {
             const isAdvanced = advancedSet.has(category.name.toLowerCase()) || /\(advanced\)/i.test(category.name);
             if (isAdvanced) {
-                const card = createCategoryCard(category.name, category.size, category.count, true);
+                const summary = categorySafetySummary.get(category.name) || null;
+                const card = createCategoryCard(category.name, category.size, category.count, true, summary);
                 categoriesList.appendChild(card);
             }
         });
@@ -430,20 +546,35 @@ function renderCategories() {
         // Also render advanced categories that exist in rules but had zero results
         (lastReport.advanced_categories || []).forEach(name => {
             if (!present.has(name.toLowerCase())) {
-                const card = createCategoryCard(name, 0, 0, true);
+                const summary = categorySafetySummary.get(name) || null;
+                const card = createCategoryCard(name, 0, 0, true, summary);
                 categoriesList.appendChild(card);
             }
         });
     }
 }
 
-function createCategoryCard(name, size, count, isAdvanced = false) {
+function createCategoryCard(name, size, count, isAdvanced = false, summary = null) {
     const categoryCard = document.createElement('div');
     categoryCard.className = 'category-card';
     categoryCard.dataset.name = name;
-    const badge = isAdvanced ? '<span class="badge badge-advanced">Advanced</span>' : '';
+    if (count === 0) {
+        categoryCard.classList.add('category-card--empty');
+    }
+
+    const badges = [];
+    if (isAdvanced) {
+        badges.push('<span class="badge badge-advanced">Advanced</span>');
+    }
+    if (summary && summary.riskyCount > 0) {
+        const label = summary.riskyCount > 1 ? `Risky (${summary.riskyCount})` : 'Risky';
+        badges.push(`<span class="badge badge-risk">${label}</span>`);
+        categoryCard.classList.add('category-card--risky');
+    }
+    const badgesMarkup = badges.length ? `<span class="category-badges">${badges.join(' ')}</span>` : '';
+
     categoryCard.innerHTML = `
-        <div class="category-name">${name} ${badge}</div>
+        <div class="category-name">${name}${badgesMarkup ? ` ${badgesMarkup}` : ''}</div>
         <div class="category-size">${formatBytes(size)} (${count} files)</div>
     `;
     categoryCard.addEventListener('click', () => filterFilesByCategory(name));
@@ -474,11 +605,23 @@ function displayFiles(files) {
     sortedFiles.slice(0, 100).forEach((file, index) => {
         const fileItem = document.createElement('div');
         fileItem.className = 'file-item';
-        
-        // Determine safety badge color
+
+        const isRisky = !file.safe_to_delete;
+        const disabled = isRisky && !allowRiskySelections;
+        if (isRisky) {
+            fileItem.classList.add('file-item--risky');
+            if (allowRiskySelections) {
+                fileItem.classList.add('file-item--risky-enabled');
+            }
+        }
+
+        // Determine safety badge colour & label
         let safetyClass = 'safety-low';
         let safetyText = 'Low';
-        if (file.safety_score >= 95) {
+        if (isRisky) {
+            safetyClass = allowRiskySelections ? 'safety-risk' : 'safety-blocked';
+            safetyText = allowRiskySelections ? 'Risky' : 'Blocked';
+        } else if (file.safety_score >= 95) {
             safetyClass = 'safety-very-high';
             safetyText = 'Very Safe';
         } else if (file.safety_score >= 80) {
@@ -488,12 +631,18 @@ function displayFiles(files) {
             safetyClass = 'safety-medium';
             safetyText = 'Review';
         }
-        
+
+        const checkboxAttrs = [
+            `id="file-${index}"`,
+            `value="${file.path}"`,
+            `data-size="${file.size}"`,
+            `data-risky="${isRisky}"`,
+            disabled ? 'disabled' : '',
+            file.auto_select && file.safe_to_delete ? 'checked' : ''
+        ].filter(Boolean).join(' ');
+
         fileItem.innerHTML = `
-            <input type="checkbox" id="file-${index}" value="${file.path}" 
-                   data-size="${file.size}"
-                   ${file.safe_to_delete ? '' : 'disabled'}
-                   ${file.auto_select ? 'checked' : ''}>
+            <input type="checkbox" ${checkboxAttrs}>
             <div class="file-info">
                 <div class="file-header">
                     <span class="file-path">${file.path}</span>
@@ -506,13 +655,31 @@ function displayFiles(files) {
                     <span class="file-category">${file.category}</span>
                     <span class="file-description">${file.description}</span>
                 </div>
+                ${isRisky ? '<div class="file-warning">Flagged for manual review. Enable Risky Mode to include this item.</div>' : ''}
             </div>
         `;
+
+        if (isRisky && allowRiskySelections) {
+            const warning = fileItem.querySelector('.file-warning');
+            if (warning) {
+                warning.textContent = 'Marked as risky. Review details before deleting.';
+            }
+        }
+
         filesList.appendChild(fileItem);
     });
     
     // Update selection count after displaying files
     updateSelectionInfo();
+}
+
+function refreshDisplayedFiles() {
+    if (currentCategoryFilter) {
+        const filtered = cleanableFiles.filter(file => file.category === currentCategoryFilter);
+        displayFiles(filtered);
+    } else {
+        displayFiles(cleanableFiles);
+    }
 }
 
 function filterFilesByCategory(categoryName) {
@@ -539,20 +706,26 @@ function filterFilesByCategory(categoryName) {
 }
 
 async function cleanCategory(categoryName) {
-    const files = cleanableFiles.filter(f => f.category === categoryName && f.safe_to_delete);
+    const files = cleanableFiles.filter(f => f.category === categoryName && (f.safe_to_delete || allowRiskySelections));
     if (files.length === 0) {
-        showNotification('No safe files found in this category', 'warning');
+        const summary = categorySafetySummary.get(categoryName);
+        if (summary && summary.riskyCount > 0 && !allowRiskySelections) {
+            showNotification('Enable Risky Mode to include items flagged for manual review.', 'warning');
+        } else {
+            showNotification('No cleanable files found in this category.', 'warning');
+        }
         return;
     }
     const totalSize = files.reduce((acc, f) => acc + (f.size || 0), 0);
+    const riskyCount = files.filter(f => !f.safe_to_delete).length;
     const confirmed = await userConfirm(
-        `Clean ${files.length} files in "${categoryName}"?\n\nThis will free approximately ${formatBytes(totalSize)}`,
+        `Clean ${files.length} files in "${categoryName}"?\n\nThis will free approximately ${formatBytes(totalSize)}${riskyCount > 0 ? `\n\nWARNING: ${riskyCount} item(s) are flagged as risky and will be moved to the Trash.` : ''}`,
         { title: 'Clean Category', kind: 'warning' }
     );
     if (!confirmed) return;
 
     try {
-        const result = await invoke('clean_files_enhanced', { filePaths: files.map(f => f.path) });
+        const result = await invoke('clean_files_enhanced', { filePaths: files.map(f => f.path), allowLowSafety: allowRiskySelections });
         const freedBytes = result.total_freed || 0;
         const filesDeleted = result.deleted_count || 0;
         showNotification(`Cleaned ${filesDeleted} files, freed ${formatBytes(freedBytes)}`, 'success');
@@ -579,7 +752,7 @@ async function cleanSelectedFiles() {
         selectedFiles.push(checkbox.value);
         totalSize += parseInt(checkbox.dataset.size || 0);
     });
-    
+
     console.log(`Selected files: ${selectedFiles.length}, Total size: ${totalSize}`);
     
     if (selectedFiles.length === 0) {
@@ -587,8 +760,18 @@ async function cleanSelectedFiles() {
         return;
     }
     
+    const selectedSet = new Set(selectedFiles);
+    const riskySelections = cleanableFiles.filter(file => selectedSet.has(file.path) && !file.safe_to_delete);
+    if (riskySelections.length > 0 && !allowRiskySelections) {
+        showNotification('Risky items are blocked. Enable Risky Mode to include them.', 'warning');
+        return;
+    }
+
     // Pre-validate with enhanced pipeline to surface warnings/errors
     let confirmMessage = `Are you sure you want to delete ${selectedFiles.length} files?\n\nThis will free approximately ${formatBytes(totalSize)}`;
+    if (riskySelections.length > 0) {
+        confirmMessage += `\n\nWARNING: ${riskySelections.length} item(s) are flagged as risky and will be moved to the Trash. Review them carefully.`;
+    }
     try {
         const prep = await invoke('prepare_deletion_enhanced', { filePaths: selectedFiles });
         if (prep && prep.validation_result) {
@@ -620,8 +803,8 @@ async function cleanSelectedFiles() {
     console.log('User confirmed, starting file cleaning...');
     
     try {
-        showNotification('Cleaning selected files...', 'success');
-        const result = await invoke('clean_files_enhanced', { filePaths: selectedFiles });
+        showNotification('Cleaning selected files...', 'info');
+        const result = await invoke('clean_files_enhanced', { filePaths: selectedFiles, allowLowSafety: allowRiskySelections });
         const freedBytes = result.total_freed || 0;
         const filesDeleted = result.deleted_count || 0;
         console.log(`Clean complete: ${filesDeleted} files deleted, ${freedBytes} bytes freed`);
@@ -1020,7 +1203,48 @@ function setupEventListeners() {
             }
         });
     }
-    
+
+    const riskToggle = document.getElementById('enable-risk-mode');
+    const initialHasRisky = Array.from(categorySafetySummary.values()).some(entry => entry.riskyCount > 0);
+    if (riskToggle) {
+        const storedRiskSetting = localStorage.getItem(RISK_MODE_STORAGE_KEY);
+        allowRiskySelections = storedRiskSetting === 'true';
+        riskToggle.checked = allowRiskySelections;
+        updateRiskModeBannerState(initialHasRisky);
+
+        riskToggle.addEventListener('change', async (event) => {
+            if (event.target.checked) {
+                const confirmed = await userConfirm(
+                    'Risky Mode allows manual selection of files flagged as low safety. They will be moved to the Trash first, but deleting them can affect apps or personal data. Continue?',
+                    { title: 'Enable Risky Mode', kind: 'warning' }
+                );
+                if (!confirmed) {
+                    event.target.checked = false;
+                    return;
+                }
+                allowRiskySelections = true;
+                localStorage.setItem(RISK_MODE_STORAGE_KEY, 'true');
+                showNotification('Risky Mode enabled. Low-safety items can now be selected manually.', 'warning', { duration: 5200 });
+            } else {
+                allowRiskySelections = false;
+                localStorage.removeItem(RISK_MODE_STORAGE_KEY);
+                document.querySelectorAll('#files-list input[type="checkbox"][data-risky="true"]').forEach(checkbox => {
+                    checkbox.checked = false;
+                    checkbox.disabled = true;
+                });
+                updateSelectionInfo();
+                showNotification('Risky Mode disabled. Low-safety items are blocked from selection.', 'info');
+            }
+
+            const hasRisky = Array.from(categorySafetySummary.values()).some(entry => entry.riskyCount > 0);
+            updateRiskModeBannerState(hasRisky);
+            refreshDisplayedFiles();
+        });
+    } else {
+        allowRiskySelections = localStorage.getItem(RISK_MODE_STORAGE_KEY) === 'true';
+        updateRiskModeBannerState(initialHasRisky);
+    }
+
     const cleanSelectedBtn = document.getElementById('clean-selected');
     if (cleanSelectedBtn) {
         console.log('Setting up clean-selected button listener');
@@ -1078,14 +1302,6 @@ function setupEventListeners() {
             updateSelectionInfo();
         }
     });
-    
-    // Notification close button
-    const notificationClose = document.querySelector('.notification-close');
-    if (notificationClose) {
-        notificationClose.addEventListener('click', () => {
-            document.getElementById('notification').classList.remove('show');
-        });
-    }
 }
 
 // Wait for window to load and Tauri to be ready

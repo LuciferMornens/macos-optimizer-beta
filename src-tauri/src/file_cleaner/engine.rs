@@ -1,4 +1,7 @@
-use std::collections::{HashSet, HashMap};
+#[cfg(feature = "parallel-scan")]
+use dashmap::DashMap;
+use rayon::prelude::*;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -6,13 +9,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::process::Command;
 use tokio::time::{sleep, Duration};
-use rayon::prelude::*;
-#[cfg(feature = "parallel-scan")]
-use dashmap::DashMap;
 
+use chrono::Local;
 #[cfg(not(feature = "parallel-scan"))]
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use chrono::Local;
 use dirs;
 use walkdir::WalkDir;
 
@@ -49,10 +49,15 @@ impl FileCleaner {
     // supports both parallel and serial paths with cancellation.
 
     /// Cancellable scan wrapper
-    pub async fn scan_system_with_cancel(&mut self, cancel: &CancellationToken) -> Result<CleaningReport, String> {
+    pub async fn scan_system_with_cancel(
+        &mut self,
+        cancel: &CancellationToken,
+    ) -> Result<CleaningReport, String> {
         #[cfg(feature = "parallel-scan")]
         {
-            if cancel.is_cancelled() { return Err("cancelled".into()); }
+            if cancel.is_cancelled() {
+                return Err("cancelled".into());
+            }
             // Run parallel scan but guard inner workers to early-out
             self.cleanable_files.clear();
             self.seen_paths.clear();
@@ -64,21 +69,37 @@ impl FileCleaner {
             let seen_paths = Arc::new(DashMap::new());
 
             let categories: Vec<_> = rules.categories.into_iter().collect();
-            let (user_rules, system_rules): (Vec<_>, Vec<_>) = categories.into_iter()
-                .partition(|r| !r.paths.iter().any(|p| p.starts_with("/System") || p.starts_with("/Library")));
+            let (user_rules, system_rules): (Vec<_>, Vec<_>) =
+                categories.into_iter().partition(|r| {
+                    !r.paths
+                        .iter()
+                        .any(|p| p.starts_with("/System") || p.starts_with("/Library"))
+                });
 
             let found_files_clone = found_files.clone();
             let seen_paths_clone = seen_paths.clone();
             let token = cancel.clone();
             user_rules.par_iter().for_each(|rule| {
-                if token.is_cancelled() { return; }
-                let paths: Vec<_> = rule.paths.iter()
+                if token.is_cancelled() {
+                    return;
+                }
+                let paths: Vec<_> = rule
+                    .paths
+                    .iter()
                     .filter_map(|p| Self::expand_path(p))
                     .filter(|path| path.exists())
                     .collect();
                 paths.par_iter().for_each(|path| {
-                    if token.is_cancelled() { return; }
-                    let _ = self.scan_path_parallel_with_cancel(path, rule, found_files_clone.clone(), seen_paths_clone.clone(), &token);
+                    if token.is_cancelled() {
+                        return;
+                    }
+                    let _ = self.scan_path_parallel_with_cancel(
+                        path,
+                        rule,
+                        found_files_clone.clone(),
+                        seen_paths_clone.clone(),
+                        &token,
+                    );
                 });
             });
 
@@ -86,41 +107,65 @@ impl FileCleaner {
             let seen_paths_clone = seen_paths.clone();
             let token = cancel.clone();
             system_rules.par_iter().for_each(|rule| {
-                if token.is_cancelled() { return; }
-                let paths: Vec<_> = rule.paths.iter()
+                if token.is_cancelled() {
+                    return;
+                }
+                let paths: Vec<_> = rule
+                    .paths
+                    .iter()
                     .filter_map(|p| Self::expand_path(p))
                     .filter(|path| path.exists())
                     .collect();
                 for path in paths {
-                    if token.is_cancelled() { break; }
-                    let _ = self.scan_path_parallel_with_cancel(&path, rule, found_files_clone.clone(), seen_paths_clone.clone(), &token);
+                    if token.is_cancelled() {
+                        break;
+                    }
+                    let _ = self.scan_path_parallel_with_cancel(
+                        &path,
+                        rule,
+                        found_files_clone.clone(),
+                        seen_paths_clone.clone(),
+                        &token,
+                    );
                 }
             });
 
             self.cleanable_files = found_files.iter().map(|e| e.value().clone()).collect();
             self.seen_paths = seen_paths.iter().map(|e| e.key().clone()).collect();
-            if cancel.is_cancelled() { return Err("cancelled".into()); }
+            if cancel.is_cancelled() {
+                return Err("cancelled".into());
+            }
             Ok(self.generate_report())
         }
 
         #[cfg(not(feature = "parallel-scan"))]
         {
-            if cancel.is_cancelled() { return Err("cancelled".into()); }
+            if cancel.is_cancelled() {
+                return Err("cancelled".into());
+            }
             self.cleanable_files.clear();
             self.seen_paths.clear();
             self.seen_dir_prefixes.clear();
 
             let rules: CleanerRules = load_rules_result()?;
             for rule in rules.categories.iter() {
-                if cancel.is_cancelled() { return Err("cancelled".into()); }
-                let paths_to_scan: Vec<_> = rule.paths.iter()
+                if cancel.is_cancelled() {
+                    return Err("cancelled".into());
+                }
+                let paths_to_scan: Vec<_> = rule
+                    .paths
+                    .iter()
                     .filter_map(|p| Self::expand_path(p))
                     .filter(|path| path.exists())
                     .collect();
                 if !paths_to_scan.is_empty() {
                     for path in paths_to_scan {
-                        if cancel.is_cancelled() { return Err("cancelled".into()); }
-                        if let Err(_) = self.scan_path_with_rule(&path, rule).await { continue; }
+                        if cancel.is_cancelled() {
+                            return Err("cancelled".into());
+                        }
+                        if let Err(_) = self.scan_path_with_rule(&path, rule).await {
+                            continue;
+                        }
                     }
                     tokio::task::yield_now().await;
                 }
@@ -129,16 +174,24 @@ impl FileCleaner {
         }
     }
 
-
-
     #[cfg(not(feature = "parallel-scan"))]
-    async fn scan_path_with_rule(&mut self, path: &Path, rule: &CategoryRule) -> Result<(), String> {
+    async fn scan_path_with_rule(
+        &mut self,
+        path: &Path,
+        rule: &CategoryRule,
+    ) -> Result<(), String> {
         let mut found_files = Vec::new();
         let mut local_seen_paths = HashSet::new();
         let mut local_seen_dirs = Vec::new();
-        
-        self.scan_path_internal(path, rule, &mut found_files, &mut local_seen_paths, &mut local_seen_dirs)?;
-        
+
+        self.scan_path_internal(
+            path,
+            rule,
+            &mut found_files,
+            &mut local_seen_paths,
+            &mut local_seen_dirs,
+        )?;
+
         // Merge results
         for file in found_files {
             self.cleanable_files.push(file);
@@ -149,10 +202,10 @@ impl FileCleaner {
         for dir in local_seen_dirs {
             self.seen_dir_prefixes.push(dir);
         }
-        
+
         Ok(())
     }
-    
+
     // The remaining parallel implementation is the cancellable variant below.
 
     #[cfg(feature = "parallel-scan")]
@@ -164,7 +217,9 @@ impl FileCleaner {
         seen_paths: Arc<DashMap<String, bool>>,
         cancel: &CancellationToken,
     ) -> Result<(), String> {
-        if !path.exists() { return Ok(()); }
+        if !path.exists() {
+            return Ok(());
+        }
         let token = cancel.clone();
         WalkDir::new(path)
             .max_depth(rule.max_depth.unwrap_or(10))
@@ -172,10 +227,14 @@ impl FileCleaner {
             .par_bridge()
             .filter_map(|e| e.ok())
             .for_each(|entry| {
-                if token.is_cancelled() { return; }
+                if token.is_cancelled() {
+                    return;
+                }
                 let file_path = entry.path();
                 let path_str = file_path.to_string_lossy().to_string();
-                if seen_paths.contains_key(&path_str) { return; }
+                if seen_paths.contains_key(&path_str) {
+                    return;
+                }
                 if let Some(cleanable) = self.process_entry(&entry, rule) {
                     found_files.insert(path_str.clone(), cleanable);
                     seen_paths.insert(path_str, true);
@@ -226,7 +285,7 @@ impl FileCleaner {
 
         // Process entries in parallel batches for better performance
         let entries: Vec<_> = iter.filter_map(|e| e.ok()).collect();
-        
+
         // Use chunks to process in batches
         for chunk in entries.chunks(100) {
             for entry in chunk {
@@ -267,8 +326,14 @@ impl FileCleaner {
                 }
 
                 // Check if this path is a child of any seen directory prefix
-                if self.seen_dir_prefixes.iter().any(|prefix| path_lower.starts_with(prefix))
-                    || local_seen_dirs.iter().any(|prefix| path_lower.starts_with(prefix)) {
+                if self
+                    .seen_dir_prefixes
+                    .iter()
+                    .any(|prefix| path_lower.starts_with(prefix))
+                    || local_seen_dirs
+                        .iter()
+                        .any(|prefix| path_lower.starts_with(prefix))
+                {
                     continue;
                 }
 
@@ -306,7 +371,9 @@ impl FileCleaner {
                     // Age filter
                     if let Some(days) = min_age {
                         if let Ok(m) = metadata.modified() {
-                            if now.signed_duration_since(DateTime::<Utc>::from(m)) < ChronoDuration::days(days) {
+                            if now.signed_duration_since(DateTime::<Utc>::from(m))
+                                < ChronoDuration::days(days)
+                            {
                                 continue;
                             }
                         }
@@ -319,12 +386,8 @@ impl FileCleaner {
                     }
 
                     let is_safe = rule.safe && is_safe_to_delete(file_path);
-                    let (safety_score, auto_select) = calculate_safety_score(
-                        file_path,
-                        &rule.name,
-                        rule.min_age_days,
-                        is_safe,
-                    );
+                    let (safety_score, auto_select) =
+                        calculate_safety_score(file_path, &rule.name, rule.min_age_days, is_safe);
 
                     let last_modified = metadata
                         .modified()
@@ -369,10 +432,7 @@ impl FileCleaner {
                                     return Some(DateTime::<Utc>::from(created));
                                 }
                             }
-                            metadata
-                                .modified()
-                                .ok()
-                                .map(|t| DateTime::<Utc>::from(t))
+                            metadata.modified().ok().map(|t| DateTime::<Utc>::from(t))
                         })();
 
                         if let Some(file_time) = relevant_time {
@@ -395,12 +455,8 @@ impl FileCleaner {
                         .unwrap_or(0);
 
                     let is_safe = rule.safe && is_safe_to_delete(file_path);
-                    let (safety_score, auto_select) = calculate_safety_score(
-                        file_path,
-                        &rule.name,
-                        rule.min_age_days,
-                        is_safe,
-                    );
+                    let (safety_score, auto_select) =
+                        calculate_safety_score(file_path, &rule.name, rule.min_age_days, is_safe);
 
                     let cleanable = CleanableFile {
                         path: key.clone(),
@@ -419,11 +475,14 @@ impl FileCleaner {
             }
         }
 
-         Ok(())
-     }
+        Ok(())
+    }
 
     pub(crate) fn get_file_description(&self, path: &Path, category: &str) -> String {
-        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("Unknown");
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("Unknown");
 
         match category {
             "System Cache" | "System Cache (Advanced)" => format!("System cache: {}", filename),
@@ -605,7 +664,14 @@ impl FileCleaner {
         // On macOS, retry permission-denied items once using a single admin prompt
         #[cfg(target_os = "macos")]
         if !pending_elevated.is_empty() {
-            match Self::remove_with_admin(&pending_elevated.iter().map(|p| p.path.as_str()).collect::<Vec<_>>()).await {
+            match Self::remove_with_admin(
+                &pending_elevated
+                    .iter()
+                    .map(|p| p.path.as_str())
+                    .collect::<Vec<_>>(),
+            )
+            .await
+            {
                 Ok(_) => {
                     // Verify and account freed sizes
                     for p in pending_elevated.iter() {
@@ -618,7 +684,11 @@ impl FileCleaner {
                             }
                         } else {
                             // Fallback check: try a final direct removal if elevation succeeded partially
-                            let _ = if p.is_dir { fs::remove_dir_all(path) } else { fs::remove_file(path) };
+                            let _ = if p.is_dir {
+                                fs::remove_dir_all(path)
+                            } else {
+                                fs::remove_file(path)
+                            };
                             if !path.exists() {
                                 total_freed += p.size;
                                 items_removed += 1;
@@ -626,7 +696,10 @@ impl FileCleaner {
                                     DIR_SIZE_CACHE.invalidate(parent).await;
                                 }
                             } else {
-                                errors.push(format!("Failed to remove {} even with admin rights", p.path));
+                                errors.push(format!(
+                                    "Failed to remove {} even with admin rights",
+                                    p.path
+                                ));
                             }
                         }
                     }
@@ -717,8 +790,7 @@ impl FileCleaner {
         }
 
         // Fallback: rename into ~/.Trash with a unique name
-        let home =
-            dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
+        let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
         let trash = home.join(".Trash");
         if !trash.exists() {
             fs::create_dir_all(&trash)
@@ -757,8 +829,7 @@ impl FileCleaner {
     /// Empty Trash using Finder (preferred), with safe fallbacks.
     pub async fn empty_trash(&self) -> Result<(u64, usize), String> {
         // Get initial trash size and count
-        let home =
-            dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
+        let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
         let trash_dir = home.join(".Trash");
 
         if !trash_dir.exists() {
@@ -823,27 +894,47 @@ impl FileCleaner {
     }
 
     // Cancellable wrappers for cleaning and trash
-    pub async fn clean_files_with_cancel(&self, file_paths: Vec<String>, cancel: &CancellationToken) -> Result<(u64, usize), String> {
+    pub async fn clean_files_with_cancel(
+        &self,
+        file_paths: Vec<String>,
+        cancel: &CancellationToken,
+    ) -> Result<(u64, usize), String> {
         let mut total_freed = 0u64;
         let mut items_removed = 0usize;
         let mut files_by_dir: HashMap<PathBuf, Vec<String>> = HashMap::new();
         for p in &file_paths {
             let path = Path::new(p);
-            let parent = path.parent().unwrap_or_else(|| Path::new("/")).to_path_buf();
-            files_by_dir.entry(parent).or_insert_with(Vec::new).push(p.clone());
+            let parent = path
+                .parent()
+                .unwrap_or_else(|| Path::new("/"))
+                .to_path_buf();
+            files_by_dir
+                .entry(parent)
+                .or_insert_with(Vec::new)
+                .push(p.clone());
         }
         for (dir, files) in files_by_dir.into_iter() {
-            if cancel.is_cancelled() { return Err("cancelled".into()); }
+            if cancel.is_cancelled() {
+                return Err("cancelled".into());
+            }
             let (f, n) = self.clean_directory_batch(dir, files).await;
-            total_freed += f; items_removed += n;
+            total_freed += f;
+            items_removed += n;
         }
         Ok((total_freed, items_removed))
     }
 
-    pub async fn empty_trash_with_cancel(&self, cancel: &CancellationToken) -> Result<(u64, usize), String> {
-        if cancel.is_cancelled() { return Err("cancelled".into()); }
+    pub async fn empty_trash_with_cancel(
+        &self,
+        cancel: &CancellationToken,
+    ) -> Result<(u64, usize), String> {
+        if cancel.is_cancelled() {
+            return Err("cancelled".into());
+        }
         let (freed, removed) = self.empty_trash().await?;
-        if cancel.is_cancelled() { return Err("cancelled".into()); }
+        if cancel.is_cancelled() {
+            return Err("cancelled".into());
+        }
         Ok((freed, removed))
     }
 

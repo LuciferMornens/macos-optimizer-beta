@@ -83,6 +83,18 @@
     border: 1px solid var(--gray-900);
 }
 
+.safety-risk {
+    background: rgba(255, 214, 10, 0.16);
+    color: #ffd60a;
+    border: 1px solid rgba(255, 214, 10, 0.4);
+}
+
+.safety-blocked {
+    background: rgba(255, 69, 58, 0.16);
+    color: #ff453a;
+    border: 1px solid rgba(255, 69, 58, 0.45);
+}
+
 /* Count Badge */
 .badge-count {
     min-width: 20px;
@@ -103,6 +115,12 @@
     background: var(--gray-800);
     color: var(--pure-white);
     border: 1px solid var(--gray-900);
+}
+
+.badge-risk {
+    background: rgba(255, 214, 10, 0.16);
+    color: #ffd60a;
+    border: 1px solid rgba(255, 214, 10, 0.4);
 }
 
 .badge-warning {

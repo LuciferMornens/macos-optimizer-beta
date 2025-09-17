@@ -215,10 +215,13 @@
                 </div>
 
                 <div class="scan-progress" id="scan-progress" style="display: none;">
-                    <div class="progress-bar">
-                        <div class="progress-fill animated"></div>
+                    <div class="scan-progress-placeholder">
+                        <div class="scan-progress-indicator"></div>
+                        <div class="scan-progress-copy">
+                            <h4>Preparing enhanced scan…</h4>
+                            <p>We’ll surface real-time safety scoring and stage updates here.</p>
+                        </div>
                     </div>
-                    <p>Scanning system for cleanable files...</p>
                 </div>
 
                 <div class="cleaning-report" id="cleaning-report" style="display: none;">
@@ -278,6 +281,18 @@
                                 Empty Trash
                             </button>
                         </div>
+                    </div>
+
+                    <div class="risk-mode-banner" id="risk-mode-banner" role="region" aria-live="polite">
+                        <div class="risk-mode-info">
+                            <span class="risk-mode-title">Risky Mode</span>
+                            <span class="risk-mode-description">Allow manual selection of low-safety items after acknowledging the risks. Files are always moved to the Trash first.</span>
+                        </div>
+                        <label class="risk-mode-toggle" for="enable-risk-mode">
+                            <input type="checkbox" id="enable-risk-mode">
+                            <span class="risk-mode-switch" aria-hidden="true"></span>
+                            <span class="risk-mode-toggle-label">Allow risky selections</span>
+                        </label>
                     </div>
 
                     <div class="categories-list" id="categories-list">
@@ -391,12 +406,7 @@
         <button class="btn btn-link" id="toggle-history" style="margin-top: 8px; font-size: 12px;">Hide History</button>
     </div>
 
-    <div class="notification" id="notification">
-        <div class="notification-content">
-            <span class="notification-message"></span>
-            <button class="notification-close">×</button>
-        </div>
-    </div>
+    <div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="true"></div>
 
     <!-- Import JavaScript modules -->
     <script src="js/progress-manager.js"></script>

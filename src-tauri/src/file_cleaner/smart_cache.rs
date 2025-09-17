@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
-use std::fs;
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 use sysinfo::System;
 
 /// Smart cache detection with validation
@@ -14,7 +14,7 @@ pub struct SmartCacheDetector {
 impl SmartCacheDetector {
     pub fn new() -> Self {
         let mut cache_signatures = HashMap::new();
-        
+
         // Define known cache signatures
         cache_signatures.insert(
             "browser_cache".to_string(),
@@ -34,7 +34,7 @@ impl SmartCacheDetector {
                 importance: CacheImportance::Low,
             },
         );
-        
+
         cache_signatures.insert(
             "xcode_cache".to_string(),
             CacheSignature {
@@ -43,16 +43,12 @@ impl SmartCacheDetector {
                     "/Library/Developer/Xcode/Archives/".to_string(),
                     "/Library/Developer/CoreSimulator/Caches/".to_string(),
                 ],
-                file_patterns: vec![
-                    "*.o".to_string(),
-                    "*.d".to_string(),
-                    "*.dia".to_string(),
-                ],
+                file_patterns: vec!["*.o".to_string(), "*.d".to_string(), "*.dia".to_string()],
                 regeneratable: true,
                 importance: CacheImportance::Medium,
             },
         );
-        
+
         cache_signatures.insert(
             "package_manager_cache".to_string(),
             CacheSignature {
@@ -94,7 +90,7 @@ impl SmartCacheDetector {
 
         // Check if path matches known cache patterns
         let path_str = path.to_string_lossy().to_lowercase();
-        
+
         for (cache_name, signature) in &self.cache_signatures {
             if signature.matches_path(&path_str) {
                 validation.is_valid_cache = true;
@@ -109,7 +105,7 @@ impl SmartCacheDetector {
         // Additional validation based on file characteristics
         if let Ok(metadata) = fs::metadata(path) {
             validation.size_bytes = metadata.len();
-            
+
             if let Ok(accessed) = metadata.accessed() {
                 validation.last_accessed = Some(DateTime::<Utc>::from(accessed));
             }
@@ -122,8 +118,11 @@ impl SmartCacheDetector {
         }
 
         // Check if associated app is active
-        validation.active_app = self.app_activity_checker.is_app_active(path, category).await;
-        
+        validation.active_app = self
+            .app_activity_checker
+            .is_app_active(path, category)
+            .await;
+
         // Adjust importance based on comprehensive analysis
         validation.importance = self.classify_cache_importance(path, &validation);
 
@@ -135,15 +134,17 @@ impl SmartCacheDetector {
         validation
     }
 
-    pub fn classify_cache_importance(&self, path: &Path, validation: &CacheValidation) -> CacheImportance {
+    pub fn classify_cache_importance(
+        &self,
+        path: &Path,
+        validation: &CacheValidation,
+    ) -> CacheImportance {
         let path_str = path.to_string_lossy().to_lowercase();
-        
+
         // User session caches are more important if recently accessed
         if let Some(last_accessed) = validation.last_accessed {
-            let days_since = Utc::now()
-                .signed_duration_since(last_accessed)
-                .num_days();
-            
+            let days_since = Utc::now().signed_duration_since(last_accessed).num_days();
+
             if days_since < 1 && validation.active_app {
                 return CacheImportance::Critical;
             } else if days_since < 7 {
@@ -197,12 +198,12 @@ impl SmartCacheDetector {
             if let (Ok(modified), Ok(created)) = (metadata.modified(), metadata.created()) {
                 let modified_time = DateTime::<Utc>::from(modified);
                 let created_time = DateTime::<Utc>::from(created);
-                
+
                 // If modified multiple times since creation, likely a cache
                 let time_diff = modified_time
                     .signed_duration_since(created_time)
                     .num_hours();
-                
+
                 return time_diff > 24; // Modified after first day
             }
         }
@@ -218,41 +219,46 @@ pub struct AppActivityChecker {
 impl AppActivityChecker {
     pub fn new() -> Self {
         let mut app_process_map = HashMap::new();
-        
+
         // Map app identifiers to process names
-        app_process_map.insert("xcode".to_string(), vec![
-            "Xcode".to_string(),
-            "xcodebuild".to_string(),
-            "swift".to_string(),
-            "swiftc".to_string(),
-        ]);
-        
-        app_process_map.insert("safari".to_string(), vec![
-            "Safari".to_string(),
-            "com.apple.Safari".to_string(),
-        ]);
-        
-        app_process_map.insert("chrome".to_string(), vec![
-            "Google Chrome".to_string(),
-            "Google Chrome Helper".to_string(),
-        ]);
-        
-        app_process_map.insert("node".to_string(), vec![
+        app_process_map.insert(
+            "xcode".to_string(),
+            vec![
+                "Xcode".to_string(),
+                "xcodebuild".to_string(),
+                "swift".to_string(),
+                "swiftc".to_string(),
+            ],
+        );
+
+        app_process_map.insert(
+            "safari".to_string(),
+            vec!["Safari".to_string(), "com.apple.Safari".to_string()],
+        );
+
+        app_process_map.insert(
+            "chrome".to_string(),
+            vec![
+                "Google Chrome".to_string(),
+                "Google Chrome Helper".to_string(),
+            ],
+        );
+
+        app_process_map.insert(
             "node".to_string(),
-            "npm".to_string(),
-            "yarn".to_string(),
-        ]);
+            vec!["node".to_string(), "npm".to_string(), "yarn".to_string()],
+        );
 
         Self { app_process_map }
     }
 
     pub async fn is_app_active(&self, path: &Path, _category: &str) -> bool {
         let path_str = path.to_string_lossy().to_lowercase();
-        
+
         // Create new system instance for checking
         let mut system = System::new_all();
         system.refresh_processes();
-        
+
         // Check for app-specific processes
         for (app_key, process_names) in &self.app_process_map {
             if path_str.contains(app_key) {
@@ -263,7 +269,7 @@ impl AppActivityChecker {
                 }
             }
         }
-        
+
         false
     }
 
@@ -271,17 +277,30 @@ impl AppActivityChecker {
         let mut active_tools = Vec::new();
         let mut system = System::new_all();
         system.refresh_processes();
-        
+
         let dev_tools = vec![
-            "Xcode", "xcodebuild", "swift", "swiftc",
-            "node", "npm", "yarn", "pnpm",
-            "python", "python3", "pip", "pip3",
-            "cargo", "rustc",
-            "go", "golang",
-            "gradle", "mvn",
-            "docker", "docker-compose",
+            "Xcode",
+            "xcodebuild",
+            "swift",
+            "swiftc",
+            "node",
+            "npm",
+            "yarn",
+            "pnpm",
+            "python",
+            "python3",
+            "pip",
+            "pip3",
+            "cargo",
+            "rustc",
+            "go",
+            "golang",
+            "gradle",
+            "mvn",
+            "docker",
+            "docker-compose",
         ];
-        
+
         for tool in &dev_tools {
             if system.processes_by_name(tool).count() > 0 {
                 if !active_tools.contains(&tool.to_string()) {
@@ -289,7 +308,7 @@ impl AppActivityChecker {
                 }
             }
         }
-        
+
         active_tools
     }
 }
@@ -331,10 +350,10 @@ impl CacheType {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum CacheImportance {
-    Critical,  // Never auto-delete
-    High,      // Requires strong confirmation
-    Medium,    // Standard confirmation
-    Low,       // Can be auto-selected
+    Critical, // Never auto-delete
+    High,     // Requires strong confirmation
+    Medium,   // Standard confirmation
+    Low,      // Can be auto-selected
     Unknown,
 }
 
@@ -385,13 +404,16 @@ impl DuplicateDetector {
 
     pub async fn find_duplicates(&mut self, paths: &[PathBuf]) -> Vec<DuplicateGroup> {
         let mut hash_map: HashMap<String, Vec<PathBuf>> = HashMap::new();
-        
+
         for path in paths {
             if let Ok(hash) = self.calculate_file_hash(path).await {
-                hash_map.entry(hash).or_insert_with(Vec::new).push(path.clone());
+                hash_map
+                    .entry(hash)
+                    .or_insert_with(Vec::new)
+                    .push(path.clone());
             }
         }
-        
+
         // Group duplicates
         let mut duplicate_groups = Vec::new();
         for (hash, files) in hash_map {
@@ -406,7 +428,7 @@ impl DuplicateDetector {
                 });
             }
         }
-        
+
         duplicate_groups
     }
 
@@ -416,13 +438,13 @@ impl DuplicateDetector {
             return Ok(hash.clone());
         }
 
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         use std::io::Read;
-        
+
         let mut file = fs::File::open(path)?;
         let mut hasher = Sha256::new();
         let mut buffer = vec![0u8; 8192];
-        
+
         loop {
             let bytes_read = file.read(&mut buffer)?;
             if bytes_read == 0 {
@@ -430,14 +452,15 @@ impl DuplicateDetector {
             }
             hasher.update(&buffer[..bytes_read]);
         }
-        
+
         let hash = format!("{:x}", hasher.finalize());
         self.hash_cache.insert(path.to_path_buf(), hash.clone());
         Ok(hash)
     }
 
     fn calculate_total_size(&self, files: &[PathBuf]) -> u64 {
-        files.iter()
+        files
+            .iter()
             .filter_map(|f| fs::metadata(f).ok())
             .map(|m| m.len())
             .sum()
@@ -446,11 +469,11 @@ impl DuplicateDetector {
     fn determine_original(&self, files: &[PathBuf]) -> Option<PathBuf> {
         // Prefer files in original locations over caches/downloads
         let mut candidates: Vec<(PathBuf, i32)> = Vec::new();
-        
+
         for file in files {
             let path_str = file.to_string_lossy().to_lowercase();
             let mut score = 0;
-            
+
             // Higher score for original locations
             if path_str.contains("/applications/") {
                 score += 10;
@@ -464,7 +487,7 @@ impl DuplicateDetector {
             if !path_str.contains("/cache") && !path_str.contains("/tmp") {
                 score += 5;
             }
-            
+
             // Prefer older files (likely original)
             if let Ok(metadata) = fs::metadata(file) {
                 if let Ok(created) = metadata.created() {
@@ -473,10 +496,10 @@ impl DuplicateDetector {
                     score += (days_old / 30) as i32; // Older files get higher score
                 }
             }
-            
+
             candidates.push((file.clone(), score));
         }
-        
+
         candidates.sort_by(|a, b| b.1.cmp(&a.1));
         candidates.first().map(|(path, _)| path.clone())
     }

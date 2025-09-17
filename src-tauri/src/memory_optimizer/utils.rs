@@ -1,9 +1,9 @@
 // src/memory_optimizer/utils.rs
 
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use lazy_static::lazy_static;
 use std::process::Command;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub struct MemoryPool {
     pools: Arc<Mutex<Vec<Vec<u8>>>>,
@@ -17,18 +17,19 @@ impl MemoryPool {
             chunk_size,
         }
     }
-    
+
     pub async fn acquire(&self) -> Vec<u8> {
         let mut pools = self.pools.lock().await;
         pools.pop().unwrap_or_else(|| vec![0; self.chunk_size])
     }
-    
+
     pub async fn release(&self, mut chunk: Vec<u8>) {
         chunk.clear();
         chunk.resize(self.chunk_size, 0);
-        
+
         let mut pools = self.pools.lock().await;
-        if pools.len() < 10 { // Keep max 10 chunks
+        if pools.len() < 10 {
+            // Keep max 10 chunks
             pools.push(chunk);
         }
     }
@@ -42,26 +43,24 @@ lazy_static! {
 // Adaptive memory pressure calculation
 pub fn calculate_adaptive_chunk_size(memory_pressure: f32) -> usize {
     let base_chunk_size = 50 * 1024 * 1024; // 50MB base
-    
+
     match memory_pressure {
-        p if p > 90.0 => base_chunk_size / 4,  // 12.5MB when pressure high
-        p if p > 75.0 => base_chunk_size / 2,  // 25MB when moderate
-        _ => base_chunk_size,                   // 50MB when low
+        p if p > 90.0 => base_chunk_size / 4, // 12.5MB when pressure high
+        p if p > 75.0 => base_chunk_size / 2, // 25MB when moderate
+        _ => base_chunk_size,                 // 50MB when low
     }
 }
 
 // Helper functions for memory stats parsing
 pub fn get_page_size() -> u64 {
     // Get macOS page size (usually 4096)
-    let output = Command::new("pagesize")
-        .output()
-        .unwrap_or_else(|_| {
-            Command::new("getconf")
-                .arg("PAGESIZE")
-                .output()
-                .expect("Failed to get page size")
-        });
-    
+    let output = Command::new("pagesize").output().unwrap_or_else(|_| {
+        Command::new("getconf")
+            .arg("PAGESIZE")
+            .output()
+            .expect("Failed to get page size")
+    });
+
     String::from_utf8_lossy(&output.stdout)
         .trim()
         .parse::<u64>()
@@ -80,12 +79,8 @@ pub fn extract_number(line: &str) -> Option<u64> {
 }
 
 pub fn extract_sysctl_value(key: &str) -> Option<u64> {
-    let output = Command::new("sysctl")
-        .arg("-n")
-        .arg(key)
-        .output()
-        .ok()?;
-    
+    let output = Command::new("sysctl").arg("-n").arg(key).output().ok()?;
+
     if output.status.success() {
         String::from_utf8_lossy(&output.stdout)
             .trim()
@@ -97,11 +92,8 @@ pub fn extract_sysctl_value(key: &str) -> Option<u64> {
 }
 
 pub fn extract_swap_used() -> u64 {
-    let output = Command::new("sysctl")
-        .arg("vm.swapusage")
-        .output()
-        .ok();
-    
+    let output = Command::new("sysctl").arg("vm.swapusage").output().ok();
+
     if let Some(output) = output {
         if output.status.success() {
             let output_str = String::from_utf8_lossy(&output.stdout);

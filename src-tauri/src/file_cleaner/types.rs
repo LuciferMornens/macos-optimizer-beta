@@ -9,8 +9,8 @@ pub struct CleanableFile {
     pub description: String,
     pub last_modified: i64,
     pub safe_to_delete: bool,
-    pub safety_score: u8,   // 0-100, where 100 is completely safe
-    pub auto_select: bool,  // Should be auto-selected for cleaning
+    pub safety_score: u8,  // 0-100, where 100 is completely safe
+    pub auto_select: bool, // Should be auto-selected for cleaning
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

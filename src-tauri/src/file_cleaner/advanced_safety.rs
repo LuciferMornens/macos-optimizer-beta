@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use std::path::Path;
-use std::fs;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 use sysinfo::System;
 
 /// Multi-layer safety analysis system
@@ -182,7 +182,6 @@ impl PatternBasedDetector {
     }
 }
 
-
 /// Analyzes file usage patterns and access history
 pub struct FileUsageAnalyzer {
     access_threshold_days: i64,
@@ -190,7 +189,9 @@ pub struct FileUsageAnalyzer {
 
 impl FileUsageAnalyzer {
     pub fn new() -> Self {
-        Self { access_threshold_days: 7 }
+        Self {
+            access_threshold_days: 7,
+        }
     }
 
     pub async fn analyze(&self, path: &Path) -> UsageAnalysisResult {
@@ -203,9 +204,7 @@ impl FileUsageAnalyzer {
         if let Ok(metadata) = fs::metadata(path) {
             if let Ok(accessed) = metadata.accessed() {
                 let accessed_time = DateTime::<Utc>::from(accessed);
-                let days_since_access = Utc::now()
-                    .signed_duration_since(accessed_time)
-                    .num_days();
+                let days_since_access = Utc::now().signed_duration_since(accessed_time).num_days();
 
                 if days_since_access < self.access_threshold_days {
                     score_adjustment -= 20;
@@ -241,7 +240,7 @@ impl FileUsageAnalyzer {
         system.refresh_all();
 
         let path_str = path.to_string_lossy();
-        
+
         for process in system.processes_by_name(&path_str) {
             // Check if process has the file open
             // This is a simplified check - in production, you'd use lsof or similar
@@ -251,7 +250,7 @@ impl FileUsageAnalyzer {
                 }
             }
         }
-        
+
         false
     }
 }
@@ -265,12 +264,13 @@ pub struct ContentInspector {
 impl ContentInspector {
     pub fn new() -> Self {
         let mut sensitive_patterns = Vec::new();
-        
+
         // Common patterns for sensitive data
         if let Ok(re) = regex::Regex::new(r"(?i)(api[_-]?key|secret|password|token|credential)") {
             sensitive_patterns.push(re);
         }
-        if let Ok(re) = regex::Regex::new(r"[A-Za-z0-9+/]{40,}={0,2}") { // Base64 encoded data
+        if let Ok(re) = regex::Regex::new(r"[A-Za-z0-9+/]{40,}={0,2}") {
+            // Base64 encoded data
             sensitive_patterns.push(re);
         }
         if let Ok(re) = regex::Regex::new(r"-----BEGIN (RSA |EC |)PRIVATE KEY-----") {
@@ -298,7 +298,8 @@ impl ContentInspector {
 
         // Skip inspection for very large files
         if let Ok(metadata) = fs::metadata(path) {
-            if metadata.len() > 100 * 1024 * 1024 { // 100MB
+            if metadata.len() > 100 * 1024 * 1024 {
+                // 100MB
                 return ContentInspectionResult {
                     score_adjustment: 0,
                     confidence: 0.3,
@@ -320,7 +321,8 @@ impl ContentInspector {
                         if file_type == "ZIP" || file_type == "PDF" {
                             // These might contain important data
                             score_adjustment -= 10;
-                            risk_factors.push(RiskFactor::PotentiallyImportantFileType(file_type.clone()));
+                            risk_factors
+                                .push(RiskFactor::PotentiallyImportantFileType(file_type.clone()));
                         }
                         break;
                     }
@@ -353,8 +355,7 @@ impl ContentInspector {
 }
 
 /// Checks system integration and dependencies
-pub struct SystemIntegrationChecker {
-}
+pub struct SystemIntegrationChecker {}
 
 impl SystemIntegrationChecker {
     pub fn new() -> Self {
@@ -539,14 +540,15 @@ pub(crate) fn should_inspect_content(path: &Path, category: &str) -> bool {
         "Temporary Files",
         "Trash",
     ];
-    
+
     if safe_categories.contains(&category) {
         return false;
     }
 
     // Skip for very large files
     if let Ok(metadata) = fs::metadata(path) {
-        if metadata.len() > 100 * 1024 * 1024 { // 100MB
+        if metadata.len() > 100 * 1024 * 1024 {
+            // 100MB
             return false;
         }
     }

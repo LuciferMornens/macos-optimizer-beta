@@ -3,8 +3,8 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use tokio::process::Command;
-use tokio_util::sync::CancellationToken;
 use tokio::select;
+use tokio_util::sync::CancellationToken;
 
 pub(crate) struct AdminScriptOutcome {
     pub success: bool,
@@ -61,13 +61,24 @@ async fn write_script(script_path: &str) {
 pub(crate) async fn run_deep_clean_with_cancel(cancel: &CancellationToken) -> AdminScriptOutcome {
     let script_path = "/tmp/macos_optimizer_deep_clean.sh";
     write_script(script_path).await;
-    let applescript = format!(r#"with timeout of 1200 seconds
+    let applescript = format!(
+        r#"with timeout of 1200 seconds
   do shell script "{}" with administrator privileges
-end timeout"#, script_path);
-    let mut child = match Command::new("osascript").arg("-e").arg(applescript).spawn() { Ok(c) => c, Err(e) => {
-        let _ = fs::remove_file(script_path);
-        return AdminScriptOutcome { success: false, stdout: String::new(), stderr: format!("Failed to spawn admin script: {}", e), cancelled: false };
-    }};
+end timeout"#,
+        script_path
+    );
+    let mut child = match Command::new("osascript").arg("-e").arg(applescript).spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = fs::remove_file(script_path);
+            return AdminScriptOutcome {
+                success: false,
+                stdout: String::new(),
+                stderr: format!("Failed to spawn admin script: {}", e),
+                cancelled: false,
+            };
+        }
+    };
 
     let outcome = select! {
         status = child.wait() => {

@@ -1,7 +1,7 @@
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
-use dashmap::DashMap;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
@@ -65,7 +65,11 @@ impl OperationRegistry {
         }
     }
 
-    pub fn register(&self, kind: OperationKind, cancellable: bool) -> (OperationId, CancellationToken) {
+    pub fn register(
+        &self,
+        kind: OperationKind,
+        cancellable: bool,
+    ) -> (OperationId, CancellationToken) {
         let id = uuid::Uuid::new_v4().to_string();
         let token = CancellationToken::new();
         let state = OpState {
@@ -79,7 +83,10 @@ impl OperationRegistry {
             cancellable,
             status: OperationStatus::Pending,
         };
-        let handle = Arc::new(OpHandle { token: token.clone(), _started_at: Instant::now() });
+        let handle = Arc::new(OpHandle {
+            token: token.clone(),
+            _started_at: Instant::now(),
+        });
         self.inner.insert(id.clone(), (state, handle));
         (id, token)
     }
@@ -131,7 +138,10 @@ impl OperationRegistry {
 
 fn now_ms() -> u128 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
 }
 
 // Simple throughput helper to compute per-tick metrics
@@ -143,7 +153,12 @@ pub struct ThroughputTracker {
 }
 
 impl ThroughputTracker {
-    pub fn tick(&mut self, files_done: u64, bytes_done: u64, total_files: u64) -> (Option<u32>, Option<f32>, Option<f32>) {
+    pub fn tick(
+        &mut self,
+        files_done: u64,
+        bytes_done: u64,
+        total_files: u64,
+    ) -> (Option<u32>, Option<f32>, Option<f32>) {
         let now = Instant::now();
         if let Some(prev) = self.last_tick {
             let dt = now.duration_since(prev).as_secs_f32().max(0.001);
@@ -154,7 +169,9 @@ impl ThroughputTracker {
             let eta_ms = if files_per_s > 0.0 {
                 let rem = (total_files.saturating_sub(files_done)) as f32;
                 Some(((rem / files_per_s) * 1000.0) as u32)
-            } else { None };
+            } else {
+                None
+            };
             self.last_tick = Some(now);
             self.last_files = files_done;
             self.last_bytes = bytes_done;

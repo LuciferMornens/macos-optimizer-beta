@@ -1,10 +1,10 @@
-use std::path::{Path, PathBuf};
-use std::fs;
-use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tokio::process::Command;
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 use sysinfo::System;
+use tokio::process::Command;
 
 use super::types::CleanableFile;
 
@@ -42,10 +42,9 @@ impl PreDeletionValidator {
                     error_type: ErrorType::FileInUse,
                     message: format!("File is currently in use: {}", file.display()),
                 });
-                validation_result.file_states.insert(
-                    file,
-                    FileValidationState::Blocked(BlockReason::InUse),
-                );
+                validation_result
+                    .file_states
+                    .insert(file, FileValidationState::Blocked(BlockReason::InUse));
             }
         }
 
@@ -59,10 +58,9 @@ impl PreDeletionValidator {
                     message: format!("File has {} dependencies", deps.len()),
                     dependencies: Some(deps),
                 });
-                validation_result.file_states.insert(
-                    file,
-                    FileValidationState::RequiresConfirmation,
-                );
+                validation_result
+                    .file_states
+                    .insert(file, FileValidationState::RequiresConfirmation);
             }
         }
 
@@ -77,15 +75,16 @@ impl PreDeletionValidator {
                     dependencies: None,
                 });
             }
-            
-            let current_state = validation_result.file_states.entry(file.clone())
+
+            let current_state = validation_result
+                .file_states
+                .entry(file.clone())
                 .or_insert(FileValidationState::Ready);
-            
+
             if !has_backup && matches!(current_state, FileValidationState::Ready) {
-                validation_result.file_states.insert(
-                    file,
-                    FileValidationState::RequiresConfirmation,
-                );
+                validation_result
+                    .file_states
+                    .insert(file, FileValidationState::RequiresConfirmation);
             }
         }
 
@@ -106,10 +105,9 @@ impl PreDeletionValidator {
                         FileValidationState::Blocked(BlockReason::SystemCritical),
                     );
                 } else {
-                    validation_result.file_states.insert(
-                        path,
-                        FileValidationState::Ready,
-                    );
+                    validation_result
+                        .file_states
+                        .insert(path, FileValidationState::Ready);
                 }
             }
         }
@@ -119,7 +117,7 @@ impl PreDeletionValidator {
 
     async fn is_critical_file(&self, path: &Path) -> bool {
         let path_str = path.to_string_lossy().to_lowercase();
-        
+
         // Check for critical system files
         let critical_patterns = vec![
             "/system/library/corefoundation",
@@ -132,13 +130,13 @@ impl PreDeletionValidator {
             ".framework",
             ".kext",
         ];
-        
+
         for pattern in critical_patterns {
             if path_str.contains(pattern) {
                 return true;
             }
         }
-        
+
         false
     }
 }
@@ -156,13 +154,13 @@ impl FileLockChecker {
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false);
-            
+
         Self { lsof_available }
     }
 
     pub async fn check_open_files(&self, files: &[CleanableFile]) -> Vec<PathBuf> {
         let mut open_files = Vec::new();
-        
+
         if self.lsof_available {
             for file in files {
                 let path = PathBuf::from(&file.path);
@@ -174,7 +172,7 @@ impl FileLockChecker {
             // Fallback: check using system info
             let mut system = System::new_all();
             system.refresh_all();
-            
+
             for file in files {
                 let path = PathBuf::from(&file.path);
                 if self.is_file_in_use_fallback(&path, &system) {
@@ -182,7 +180,7 @@ impl FileLockChecker {
                 }
             }
         }
-        
+
         open_files
     }
 
@@ -190,12 +188,9 @@ impl FileLockChecker {
         if !self.lsof_available {
             return false;
         }
-        
-        let output = Command::new("lsof")
-            .arg(path)
-            .output()
-            .await;
-            
+
+        let output = Command::new("lsof").arg(path).output().await;
+
         match output {
             Ok(output) => !output.stdout.is_empty(),
             Err(_) => false,
@@ -213,11 +208,16 @@ impl FileLockChecker {
 pub struct DependencyChecker {}
 
 impl DependencyChecker {
-    pub fn new() -> Self { Self {} }
+    pub fn new() -> Self {
+        Self {}
+    }
 
-    pub async fn verify_no_dependencies(&self, files: &[CleanableFile]) -> HashMap<PathBuf, Vec<PathBuf>> {
+    pub async fn verify_no_dependencies(
+        &self,
+        files: &[CleanableFile],
+    ) -> HashMap<PathBuf, Vec<PathBuf>> {
         let mut dependencies = HashMap::new();
-        
+
         for file in files {
             let path = PathBuf::from(&file.path);
             let deps = self.find_dependencies(&path).await;
@@ -225,13 +225,13 @@ impl DependencyChecker {
                 dependencies.insert(path, deps);
             }
         }
-        
+
         dependencies
     }
 
     async fn find_dependencies(&self, path: &Path) -> Vec<PathBuf> {
         let mut deps = Vec::new();
-        
+
         // Check for symbolic links pointing to this file
         if let Ok(output) = Command::new("find")
             .arg("/")
@@ -251,7 +251,7 @@ impl DependencyChecker {
                 }
             }
         }
-        
+
         // Check for plist files referencing this path
         let path_str = path.to_string_lossy();
         if let Ok(output) = Command::new("grep")
@@ -271,7 +271,7 @@ impl DependencyChecker {
                 }
             }
         }
-        
+
         deps
     }
 }
@@ -285,8 +285,10 @@ impl BackupVerifier {
     pub fn new() -> Self {
         // Check if Time Machine is enabled
         let time_machine_enabled = Self::check_time_machine_status();
-        
-        Self { time_machine_enabled }
+
+        Self {
+            time_machine_enabled,
+        }
     }
 
     fn check_time_machine_status() -> bool {
@@ -299,13 +301,13 @@ impl BackupVerifier {
 
     pub async fn verify_backup_coverage(&self, files: &[CleanableFile]) -> HashMap<PathBuf, bool> {
         let mut backup_status = HashMap::new();
-        
+
         for file in files {
             let path = PathBuf::from(&file.path);
             let has_backup = self.is_backed_up(&path).await;
             backup_status.insert(path, has_backup);
         }
-        
+
         backup_status
     }
 
@@ -313,7 +315,7 @@ impl BackupVerifier {
         if !self.time_machine_enabled {
             return false;
         }
-        
+
         // Check if file is excluded from Time Machine
         if let Ok(output) = Command::new("tmutil")
             .arg("isexcluded")
@@ -325,7 +327,7 @@ impl BackupVerifier {
             // If not excluded, it's backed up
             return !stdout.contains("Excluded");
         }
-        
+
         false
     }
 }
@@ -336,21 +338,28 @@ pub struct RecoveryManager {
 }
 
 impl RecoveryManager {
-    pub fn new() -> Self { Self { recovery_points: Vec::new() } }
+    pub fn new() -> Self {
+        Self {
+            recovery_points: Vec::new(),
+        }
+    }
 
     pub fn create_recovery_point(&mut self, files: &[CleanableFile]) -> RecoveryPoint {
         let recovery_point = RecoveryPoint {
             id: uuid::Uuid::new_v4().to_string(),
             timestamp: Utc::now(),
-            files: files.iter().map(|f| RecoveryFile {
-                original_path: PathBuf::from(&f.path),
-                size: f.size,
-                category: f.category.clone(),
-                metadata: self.capture_metadata(&PathBuf::from(&f.path)),
-            }).collect(),
+            files: files
+                .iter()
+                .map(|f| RecoveryFile {
+                    original_path: PathBuf::from(&f.path),
+                    size: f.size,
+                    category: f.category.clone(),
+                    metadata: self.capture_metadata(&PathBuf::from(&f.path)),
+                })
+                .collect(),
             recovery_method: self.determine_recovery_method(files),
         };
-        
+
         self.recovery_points.push(recovery_point.clone());
         recovery_point
     }
@@ -364,7 +373,7 @@ impl RecoveryManager {
             modified: None,
             file_type: FileType::Unknown,
         };
-        
+
         if let Ok(meta) = fs::metadata(path) {
             if let Ok(created) = meta.created() {
                 metadata.created = Some(DateTime::<Utc>::from(created));
@@ -372,7 +381,7 @@ impl RecoveryManager {
             if let Ok(modified) = meta.modified() {
                 metadata.modified = Some(DateTime::<Utc>::from(modified));
             }
-            
+
             if meta.is_file() {
                 metadata.file_type = FileType::Regular;
             } else if meta.is_dir() {
@@ -381,7 +390,7 @@ impl RecoveryManager {
                 metadata.file_type = FileType::Symlink;
             }
         }
-        
+
         metadata
     }
 
@@ -391,7 +400,7 @@ impl RecoveryManager {
             let path = PathBuf::from(&f.path);
             !path.starts_with("/System") && !path.starts_with("/Library")
         });
-        
+
         if all_trash_eligible {
             RecoveryMethod::TrashRestore
         } else {

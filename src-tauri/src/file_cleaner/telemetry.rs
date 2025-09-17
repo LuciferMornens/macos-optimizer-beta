@@ -1,5 +1,5 @@
-use std::fs;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -15,9 +15,16 @@ pub struct SafetyMetricsCollector {
 }
 
 impl SafetyMetricsCollector {
-    pub fn new() -> Self { Self { snapshot: TelemetrySnapshot::default(), scan_timer: None } }
+    pub fn new() -> Self {
+        Self {
+            snapshot: TelemetrySnapshot::default(),
+            scan_timer: None,
+        }
+    }
 
-    pub fn start_scan(&mut self) { self.scan_timer = Some(Instant::now()); }
+    pub fn start_scan(&mut self) {
+        self.scan_timer = Some(Instant::now());
+    }
 
     pub fn finish_scan(&mut self) {
         self.snapshot.total_scans = self.snapshot.total_scans.saturating_add(1);
@@ -32,7 +39,9 @@ impl SafetyMetricsCollector {
         let _ = self.persist();
     }
 
-    pub fn get_snapshot(&self) -> TelemetrySnapshot { self.snapshot.clone() }
+    pub fn get_snapshot(&self) -> TelemetrySnapshot {
+        self.snapshot.clone()
+    }
 
     fn persist(&self) -> std::io::Result<()> {
         if let Some(mut path) = dirs::data_dir() {

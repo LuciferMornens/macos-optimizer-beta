@@ -2,8 +2,8 @@
 
 use std::process::Command;
 
-use super::{MemoryStats};
-use super::utils::{get_page_size, extract_number, extract_sysctl_value, extract_swap_used};
+use super::utils::{extract_number, extract_swap_used, extract_sysctl_value, get_page_size};
+use super::MemoryStats;
 
 pub(crate) fn get_memory_stats() -> Result<MemoryStats, String> {
     // Use vm_stat command to get detailed memory information on macOS
@@ -65,7 +65,8 @@ pub(crate) fn get_memory_stats() -> Result<MemoryStats, String> {
     stats.cache_files = file_backed * page_size;
 
     // Available memory = free + inactive + purgeable + speculative
-    stats.available = (pages_free + pages_inactive + pages_purgeable + pages_speculative) * page_size;
+    stats.available =
+        (pages_free + pages_inactive + pages_purgeable + pages_speculative) * page_size;
 
     // App memory = active pages
     stats.app_memory = pages_active * page_size;

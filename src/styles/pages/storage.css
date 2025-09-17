@@ -22,58 +22,104 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-xl);
     padding: var(--space-2xl);
-    text-align: center;
     margin-bottom: var(--space-xl);
     position: relative;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xl);
 }
 
 .scan-progress::before {
     content: '';
     position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, var(--gray-100), transparent);
-    animation: scan-sweep 2s linear infinite;
+    inset: 0;
+    background: radial-gradient(circle at top, rgba(124, 92, 252, 0.12), transparent 60%);
+    pointer-events: none;
 }
 
-@keyframes scan-sweep {
-    0% {
-        left: -100%;
-    }
-    100% {
-        left: 100%;
-    }
+.scan-progress-placeholder {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
 }
 
-.scan-icon {
-    font-size: 3rem;
-    margin-bottom: var(--space-lg);
+.scan-progress-indicator {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 3px solid rgba(124, 92, 252, 0.25);
+    border-top-color: rgba(79, 70, 229, 0.9);
+    animation: spin 1s linear infinite;
+}
+
+.scan-progress-copy h4 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.scan-progress-copy p {
+    margin: 4px 0 0;
     color: var(--text-secondary);
-    animation: rotate 2s linear infinite;
+    font-size: 0.85rem;
 }
 
-@keyframes rotate {
+.scan-progress .operation-progress {
+    background: rgba(18, 18, 20, 0.78);
+    border: 1px solid rgba(124, 92, 252, 0.35);
+    box-shadow: 0 24px 60px rgba(17, 17, 26, 0.25);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    width: 100%;
+    margin-top: 0;
+}
+
+.scan-progress .operation-progress .progress-title {
+    color: var(--pure-white);
+}
+
+.scan-progress .operation-progress .progress-percentage {
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.scan-progress .operation-progress .progress-message {
+    color: var(--pure-white);
+}
+
+.scan-progress .operation-progress .progress-stage {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.scan-progress .operation-progress .progress-bar-track {
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.scan-progress .operation-progress .progress-bar-fill::after {
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+}
+
+.scan-progress .operation-progress .progress-cancel {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.scan-progress .operation-progress .progress-cancel:hover {
+    color: var(--pure-white);
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.scan-progress.has-operation-progress .scan-progress-placeholder {
+    display: none;
+}
+
+@keyframes spin {
     from {
         transform: rotate(0deg);
     }
     to {
         transform: rotate(360deg);
     }
-}
-
-.scan-progress p {
-    margin-top: var(--space-md);
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-}
-
-.scan-progress-bar {
-    width: 100%;
-    max-width: 400px;
-    margin: var(--space-lg) auto;
 }
 
 /* Cleaning Report */
@@ -197,6 +243,120 @@
     display: flex;
     align-items: center;
     gap: var(--space-xs);
+}
+
+.risk-mode-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    margin-bottom: var(--space-lg);
+    padding: var(--space-md) var(--space-lg);
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(255, 214, 10, 0.28);
+    background: rgba(255, 214, 10, 0.08);
+    transition: border-color var(--transition-base), background var(--transition-base), box-shadow var(--transition-base);
+}
+
+.risk-mode-banner--active {
+    border-color: rgba(255, 69, 58, 0.45);
+    background: rgba(255, 69, 58, 0.12);
+    box-shadow: 0 12px 32px rgba(255, 69, 58, 0.12);
+}
+
+.risk-mode-banner--no-risk {
+    border-style: dashed;
+    border-color: var(--border-subtle);
+    background: var(--bg-elevated);
+}
+
+.risk-mode-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.risk-mode-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+}
+
+.risk-mode-description {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.risk-mode-banner--active .risk-mode-description {
+    color: #ff453a;
+}
+
+.risk-mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+}
+
+.risk-mode-toggle input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.risk-mode-switch {
+    width: 44px;
+    height: 24px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
+    transition: all var(--transition-base);
+}
+
+.risk-mode-switch::after {
+    content: '';
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--pure-white);
+    transform: translateX(0);
+    transition: transform var(--transition-base), background var(--transition-base);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.risk-mode-toggle input:checked + .risk-mode-switch {
+    background: rgba(255, 69, 58, 0.3);
+    border-color: rgba(255, 69, 58, 0.5);
+}
+
+.risk-mode-toggle input:checked + .risk-mode-switch::after {
+    transform: translateX(20px);
+    background: #ff453a;
+}
+
+.risk-mode-toggle-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+@media (max-width: 720px) {
+    .risk-mode-banner {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .risk-mode-toggle {
+        justify-content: space-between;
+    }
 }
 
 #selected-count {

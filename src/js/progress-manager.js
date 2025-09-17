@@ -84,8 +84,12 @@ class ProgressManager {
             if (progressBar) {
                 progressBar.classList.add('fade-out');
                 setTimeout(() => {
+                    const parent = progressBar.parentElement;
                     progressBar.remove();
                     this.progressBars.delete(operation_id);
+                    if (parent && parent.classList && parent.querySelector('.operation-progress') === null) {
+                        parent.classList.remove('has-operation-progress');
+                    }
                 }, 300);
             }
         }, 2000);
@@ -124,6 +128,7 @@ class ProgressManager {
                 return document.getElementById('memory-progress-container') || 
                        document.querySelector('#memory .tab-content');
             case 'file_scan':
+            case 'enhanced_file_scan':
                 return document.getElementById('scan-progress') || 
                        document.querySelector('#storage .tab-content');
             default:
@@ -147,6 +152,7 @@ class ProgressManager {
             'memory_optimization': 'Memory Optimization',
             'memory_optimization_admin': 'Deep Memory Clean',
             'file_scan': 'File System Scan',
+            'enhanced_file_scan': 'Enhanced Scan',
             'file_clean': 'File Cleaning',
             'process_kill': 'Process Management'
         };
@@ -159,17 +165,21 @@ class ProgressManager {
         progressBar.dataset.operationId = operationId;
         progressBar.innerHTML = `
             <div class="progress-header">
-                <span class="progress-title">Processing...</span>
+                <div class="progress-meta">
+                    <span class="progress-title">Processing...</span>
+                    <span class="progress-percentage">0%</span>
+                </div>
                 <button class="progress-cancel btn-link" data-operation="${operationId}" style="display: none;">
                     Cancel
                 </button>
             </div>
-            <div class="progress-bar-container">
+            <div class="progress-bar-track">
                 <div class="progress-bar-fill"></div>
-                <div class="progress-percentage">0%</div>
             </div>
-            <div class="progress-message">Starting...</div>
-            <div class="progress-stage"></div>
+            <div class="progress-footer">
+                <span class="progress-message">Starting...</span>
+                <span class="progress-stage"></span>
+            </div>
         `;
         
         // Add cancel handler
@@ -181,6 +191,9 @@ class ProgressManager {
         }
         
         container.appendChild(progressBar);
+        if (container && container.classList) {
+            container.classList.add('has-operation-progress');
+        }
         this.progressBars.set(operationId, progressBar);
         
         // Animate in
@@ -215,18 +228,22 @@ class ProgressManager {
         }
         
         if (stageEl) {
-            let extra = '';
+            const parts = [];
+            if (stage) {
+                parts.push(`Stage: ${stage}`);
+            }
             if (etaMs !== undefined && etaMs !== null && etaMs > 0) {
                 const secs = Math.round(etaMs / 1000);
-                extra += ` • ETA: ${secs}s`;
+                parts.push(`ETA ${secs}s`);
             }
             if (throughput && (throughput.files_per_s || throughput.mb_per_s)) {
                 const fps = throughput.files_per_s ? `${throughput.files_per_s.toFixed(1)} f/s` : '';
                 const mbs = throughput.mb_per_s ? `${throughput.mb_per_s.toFixed(1)} MB/s` : '';
                 const thr = [fps, mbs].filter(Boolean).join(' ');
-                if (thr) extra += ` • ${thr}`;
+                if (thr) parts.push(thr);
             }
-            stageEl.textContent = stage ? `Stage: ${stage}${extra}` : extra;
+            stageEl.textContent = parts.join(' • ');
+            stageEl.classList.toggle('is-hidden', stageEl.textContent.length === 0);
         }
         
         // Show/hide cancel button based on operation stage
