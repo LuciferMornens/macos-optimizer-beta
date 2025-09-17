@@ -35,8 +35,14 @@ npm install
 
 # Start the development build (disables noisy OS_ACTIVITY logs by default)
 npm run dev
+
+# Or invoke the Cargo subcommand directly (same feature set as the npm script)
+cargo tauri dev -- --features app,parallel-scan,metrics
 ```
 This spins up Vite+Tauri in "dev" mode: the Rust backend recompiles on change and the WebView hot-reloads.
+
+> **Why the explicit feature list?**
+> The backend keeps Tauri bindings behind an optional `app` feature so library/test builds compile without pulling the WebView stack. `parallel-scan` and `metrics` stay enabled for runtime performance and instrumentation. The `npm run dev` script already forwards these flags, but bare `cargo tauri dev` does not, so you need `--features app,parallel-scan,metrics` (the `--` separates Cargo arguments from `tauri dev`). Omitting them skips `app`, and Cargo refuses to build the binary required by `src-tauri/Cargo.toml`.
 
 ## Building a Release
 ```bash
