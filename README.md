@@ -79,14 +79,22 @@ The signed `.app` bundle lands in `src-tauri/target/release/bundle/macos/`. Drag
 - **Environment** – most commands are macOS-specific; running on other platforms is not supported.
 
 ## Testing
+### Rust backend (default)
 ```bash
-# Run the full Rust test suite (macOS only)
-cargo test
-
-# Smoke-test the telemetry stack
-cargo test metrics::tests::sampler_emits_recent_snapshot
+# From the repository root
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
-Some cleaner tests assert against macOS directory conventions; ensure you run them on a development machine with typical user folders available.
+This command compiles the Tauri workspace in test mode and executes every unit and integration test, including the storage cleaner suite. The build takes place entirely in `src-tauri/`, so the top-level Node dependencies do not need to be rebuilt beforehand.
+
+### Targeted test runs
+```bash
+# Example: run only the telemetry sampler test
+cargo test --manifest-path src-tauri/Cargo.toml metrics::tests::sampler_emits_recent_snapshot
+
+# Example: run just the storage cleaner tests
+cargo test --manifest-path src-tauri/Cargo.toml --test storage_cleaner
+```
+If you are iterating on a single module, use the fully qualified test path (as in the sampler example) or pass `--test <name>` to select an integration test binary. The storage cleaner tests exercise macOS-specific paths and expect a standard user environment, so run them on a Mac with typical user folders present.
 
 ## Troubleshooting
 - **Build fails / codesign errors** – confirm Xcode Command Line Tools are installed and that you’ve accepted the license (`sudo xcodebuild -license`).
