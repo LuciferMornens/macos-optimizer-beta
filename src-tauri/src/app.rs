@@ -16,7 +16,7 @@ use crate::system_info::{
 
 use crate::file_cleaner::{load_rules_result, DynamicRuleEngine, RuleValidator};
 use serde::Serialize;
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, LogicalSize, Manager, State};
 use tokio::sync::RwLock;
 
 // Progress event types for real-time operation feedback
@@ -52,6 +52,9 @@ struct Throughput {
     files_per_s: Option<f32>,
     mb_per_s: Option<f32>,
 }
+
+const MIN_WINDOW_WIDTH: f64 = 600.0;
+const MIN_WINDOW_HEIGHT: f64 = 600.0;
 
 // Create a state to manage our system monitor
 struct AppState {
@@ -1218,6 +1221,8 @@ pub fn run() {
         .setup(|app| {
             // Ensure main window is visible and focused before heavy rendering starts.
             if let Some(win) = app.get_webview_window("main") {
+                let min_size = LogicalSize::new(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
+                let _ = win.set_min_size(Some(min_size));
                 let _ = win.show();
                 let _ = win.set_focus();
             }
