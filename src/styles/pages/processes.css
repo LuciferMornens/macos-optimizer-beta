@@ -96,13 +96,15 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
-    overflow: hidden;
+    overflow: auto;
+    max-height: 70vh;
     box-shadow: var(--shadow-sm);
 }
 
 .processes-table table {
     width: 100%;
     border-collapse: collapse;
+    table-layout: fixed;
 }
 
 .processes-table thead {
@@ -185,6 +187,52 @@
     font-size: 0.72rem;
 }
 
+/* Kill Process (End Task) Button */
+.kill-process {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 14px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    font-family: inherit;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    transition:
+        background var(--transition-fast),
+        border-color var(--transition-fast),
+        color var(--transition-fast),
+        transform var(--transition-fast),
+        box-shadow var(--transition-fast);
+    -webkit-user-select: none;
+    user-select: none;
+    white-space: nowrap;
+    line-height: 1.4;
+}
+
+.kill-process:hover {
+    color: #b91c1c;
+    border-color: #b91c1c;
+    background: rgba(185, 28, 28, 0.06);
+    transform: translateY(-0.5px);
+    box-shadow: 0 2px 8px rgba(185, 28, 28, 0.1);
+}
+
+.kill-process:active {
+    transform: translateY(0) scale(0.96);
+    background: rgba(185, 28, 28, 0.10);
+    transition-duration: 60ms;
+}
+
+.kill-process:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+}
+
 /* Last row no border */
 .processes-table tbody tr:last-child td {
     border-bottom: none;
@@ -215,7 +263,7 @@
 @media (prefers-color-scheme: dark) {
     .processes-filter input[type="text"],
     .processes-filter select {
-        background: var(--bg-secondary);
+        background-color: var(--bg-secondary);
         border-color: var(--border-subtle);
         color: var(--text-primary);
     }
@@ -256,5 +304,21 @@
 
     .processes-table th {
         border-color: rgba(255, 255, 255, 0.08);
+    }
+
+    .kill-process {
+        color: #a0a0a0;
+        border-color: rgba(255, 255, 255, 0.10);
+    }
+
+    .kill-process:hover {
+        color: #f87171;
+        border-color: #f87171;
+        background: rgba(248, 113, 113, 0.08);
+        box-shadow: 0 2px 8px rgba(248, 113, 113, 0.12);
+    }
+
+    .kill-process:active {
+        background: rgba(248, 113, 113, 0.14);
     }
 }

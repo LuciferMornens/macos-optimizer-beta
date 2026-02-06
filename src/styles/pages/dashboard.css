@@ -20,6 +20,7 @@
 
 /* Staggered entrance for stat cards */
 #dashboard .stats-grid .stat-card {
+    min-width: 0;
     opacity: 0;
     animation: cardRevealUp 0.45s cubic-bezier(0.25, 1, 0.5, 1) forwards;
     will-change: transform, opacity;
@@ -47,10 +48,18 @@
     gap: 28px;
 }
 
+.system-overview > * {
+    min-width: 0;
+}
+
 .performance-meters {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 20px;
+}
+
+.performance-meters > * {
+    min-width: 0;
 }
 
 .performance-meter {
@@ -95,6 +104,10 @@
     gap: 20px;
 }
 
+.quick-actions > * {
+    min-width: 0;
+}
+
 .quick-action-card {
     padding: 22px;
     border-radius: var(--radius-lg);
@@ -126,14 +139,15 @@
 }
 
 /* System Details Section */
-.system-details {
+#dashboard .system-details {
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
-    padding: 28px;
+    padding: 28px 32px;
     box-shadow: var(--shadow-sm);
     display: grid;
     gap: 20px;
+    margin-top: 8px;
     opacity: 0;
     animation: cardRevealUp 0.45s cubic-bezier(0.25, 1, 0.5, 1) 0.28s forwards;
 }
@@ -148,44 +162,59 @@
     margin: 0;
 }
 
-.info-grid {
+#dashboard .info-grid {
     display: grid;
+    grid-template-columns: 1fr;
     gap: 0;
 }
 
-.info-item {
+#dashboard .info-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 16px;
+    gap: 24px;
     font-size: 0.875rem;
-    padding: 12px 0;
+    padding: 14px 4px;
     border-bottom: 1px solid var(--border-subtle);
     transition: background var(--transition-fast);
 }
 
-.info-item:last-child {
+#dashboard .info-item:hover {
+    background: rgba(17, 17, 17, 0.02);
+    border-radius: var(--radius-sm);
+}
+
+#dashboard .info-item:last-child {
     border-bottom: none;
     padding-bottom: 0;
 }
 
-.info-item:first-child {
+#dashboard .info-item:first-child {
     padding-top: 0;
 }
 
-.info-label {
+#dashboard .info-label {
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 0.72rem;
+    font-weight: 500;
     color: var(--text-tertiary);
     flex-shrink: 0;
+    white-space: nowrap;
 }
 
-.info-value {
+#dashboard .info-value {
     color: var(--text-secondary);
     font-family: var(--font-mono);
     font-size: 0.84rem;
     text-align: right;
+    white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+    #dashboard .info-item:hover {
+        background: rgba(255, 255, 255, 0.03);
+    }
 }
 
 /* Responsive: 2 columns at medium, 1 column at small */

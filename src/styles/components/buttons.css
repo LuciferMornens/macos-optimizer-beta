@@ -216,6 +216,7 @@
 
 .button-group {
     display: flex;
+    align-items: center;
     gap: 12px;
     flex-wrap: wrap;
 }
@@ -223,6 +224,12 @@
 .button-group-connected .btn:not(:last-child) {
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
+    border-right-width: 0;
+}
+
+.button-group-connected .btn:not(:first-child) {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
 }
 
 /* Special Quick Optimize Button */

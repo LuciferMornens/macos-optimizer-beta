@@ -128,14 +128,13 @@
 }
 
 .nav-item .icon {
-    width: 18px;
-    height: 18px;
+    width: 32px;
+    height: 32px;
     padding: 7px;
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.06);
     color: inherit;
-    display: grid;
-    place-items: center;
+    flex-shrink: 0;
     transition: background var(--transition-base),
                 color var(--transition-base),
                 box-shadow var(--transition-base),
@@ -194,13 +193,6 @@
     background: var(--sidebar-active-icon-bg);
     color: var(--sidebar-active-icon-color);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-}
-
-/* Navigation Icons */
-.nav-item .icon {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
 }
 
 .nav-item span {

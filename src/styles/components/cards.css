@@ -20,6 +20,7 @@
     transform: translateY(-3px);
     border-color: var(--border-default);
     box-shadow: var(--shadow-md);
+    z-index: 1;
 }
 
 .stat-card {
@@ -41,6 +42,7 @@
     transform: translateY(-2px);
     box-shadow: var(--shadow-md);
     border-color: var(--border-default);
+    z-index: 1;
 }
 
 .stat-header {
@@ -86,6 +88,7 @@
     border-color: var(--border-default);
     transform: translateY(-2px);
     box-shadow: var(--shadow-sm);
+    z-index: 1;
 }
 
 .category-card:active {

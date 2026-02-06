@@ -16,6 +16,8 @@
     border-radius: var(--radius-xl);
     padding: 32px;
     min-height: 340px;
+    min-width: 0;
+    overflow: hidden;
     display: grid;
     place-items: center;
     box-shadow: var(--shadow-sm);
@@ -35,6 +37,7 @@
     display: grid;
     gap: 10px;
     align-content: start;
+    min-width: 0;
 }
 
 .memory-stat {

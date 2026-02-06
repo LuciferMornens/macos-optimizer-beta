@@ -2,11 +2,6 @@
    Premium Elegance Enhancements
    ======================================== */
 
-.content {
-    position: relative;
-    background: var(--bg-primary);
-}
-
 .content::before {
     content: '';
     position: absolute;

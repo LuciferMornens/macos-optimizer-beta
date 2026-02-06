@@ -399,22 +399,27 @@
 
 .animate-fadeInUp {
     animation: fadeInUp 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+    animation-fill-mode: backwards;
 }
 
 .animate-fadeInScale {
     animation: fadeInScale 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+    animation-fill-mode: backwards;
 }
 
 .animate-slideInLeft {
     animation: slideInLeft var(--transition-base);
+    animation-fill-mode: backwards;
 }
 
 .animate-slideInRight {
     animation: slideInRight var(--transition-base);
+    animation-fill-mode: backwards;
 }
 
 .animate-scaleIn {
     animation: scaleIn var(--transition-spring);
+    animation-fill-mode: backwards;
 }
 
 .animate-spin {
@@ -443,6 +448,7 @@
 /* Page enter animation for tab content */
 .animate-pageEnter {
     animation: pageEnter 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+    animation-fill-mode: backwards;
 }
 
 .animate-pageExit {

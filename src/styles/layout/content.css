@@ -247,11 +247,6 @@
 
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
-    .content::before {
-        background: radial-gradient(ellipse at 70% 0%, rgba(255, 255, 255, 0.02) 0%, transparent 50%);
-        opacity: 1;
-    }
-
     .loading-spinner {
         border-color: var(--border-subtle);
         border-top-color: var(--text-primary);
