@@ -14,11 +14,11 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-xl);
-    padding: 32px;
+    padding: 28px 32px 32px;
     box-shadow: var(--shadow-md);
     display: grid;
     gap: 24px;
-    animation: fadeInUp 0.45s cubic-bezier(0.25, 1, 0.5, 1);
+    animation: scanContainerReveal 0.45s cubic-bezier(0.25, 1, 0.5, 1) backwards;
     position: relative;
     overflow: hidden;
 }
@@ -71,16 +71,32 @@
     letter-spacing: 0.005em;
 }
 
+/* Separator between spinner area and progress card */
+.scan-progress .scan-progress-placeholder + .operation-progress::before {
+    content: '';
+    position: absolute;
+    top: -13px;
+    left: 24px;
+    right: 24px;
+    height: 1px;
+    background: var(--border-subtle);
+    pointer-events: none;
+}
+
 /* Nested progress card inside scan area */
 .scan-progress .operation-progress {
     background: var(--bg-secondary);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
-    padding: 22px 24px;
+    padding: 20px 24px;
     box-shadow: var(--shadow-inner);
     position: relative;
     z-index: 1;
-    animation: fadeInUp 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+    animation: scanCardReveal 0.35s cubic-bezier(0.25, 1, 0.5, 1) 0.08s backwards;
+}
+
+.scan-progress .progress-header {
+    align-items: center;
 }
 
 .scan-progress .progress-title {
@@ -97,24 +113,47 @@
     text-transform: none;
 }
 
+.scan-progress .progress-cancel {
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    padding: 4px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-full);
+    background: transparent;
+    transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.scan-progress .progress-cancel:hover {
+    color: var(--text-primary);
+    border-color: var(--border-default);
+    background: var(--bg-tertiary);
+}
+
 .scan-progress .progress-bar-track {
-    height: 8px;
+    height: 6px;
     background: var(--bg-tertiary);
     box-shadow: var(--shadow-inner);
 }
 
+.scan-progress .progress-footer {
+    margin-top: 2px;
+}
+
 .scan-progress .progress-message {
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     color: var(--text-secondary);
 }
 
 .scan-progress .progress-stage {
-    font-size: 0.68rem;
+    font-size: 0.65rem;
     letter-spacing: 0.1em;
     color: var(--text-tertiary);
     background: var(--bg-tertiary);
     padding: 3px 10px;
     border-radius: var(--radius-full);
+    border: 1px solid var(--border-subtle);
 }
 
 /* Cleaning Report Container */
@@ -442,6 +481,30 @@
     }
 }
 
+/* Unique keyframe for scan container - avoids collision with global fadeInUp */
+@keyframes scanContainerReveal {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Unique keyframe for progress card inside scan area */
+@keyframes scanCardReveal {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 @keyframes fadeInUp {
     from {
         opacity: 0;
@@ -542,12 +605,27 @@
         border-color: rgba(255, 255, 255, 0.08);
     }
 
+    .scan-progress .scan-progress-placeholder + .operation-progress::before {
+        background: rgba(255, 255, 255, 0.06);
+    }
+
+    .scan-progress .progress-cancel {
+        border-color: rgba(255, 255, 255, 0.1);
+        color: var(--text-tertiary);
+    }
+
+    .scan-progress .progress-cancel:hover {
+        border-color: rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.06);
+    }
+
     .scan-progress .progress-bar-track {
         background: rgba(255, 255, 255, 0.06);
     }
 
     .scan-progress .progress-stage {
         background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 255, 255, 0.08);
     }
 }
 

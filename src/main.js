@@ -446,7 +446,7 @@ async function scanForCleanableFiles() {
     
     return operationQueue.add(
         async () => {
-            scanProgress.style.display = 'block';
+            scanProgress.style.display = '';
             cleaningReport.style.display = 'none';
             cleanButton.disabled = true;
             
