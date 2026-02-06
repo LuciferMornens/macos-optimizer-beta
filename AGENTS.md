@@ -1,7 +1,7 @@
 ## Main Rules For The Agent
 Main rule: first investigate and do deep dive on the codebase, gather the right amount of context, then proceed with implementations/fixes/research
 
-Start by seeing the current date with a bash command.
+Start by seeing the current date with a bash command once per session.
 
 1. Write production-ready code. No mockup implementations, no 'todos' remaining in the code. Everything written flawless.
 2. Act like a senior expert developer with more than 20 years of experience.
