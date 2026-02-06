@@ -23,15 +23,21 @@ impl DynamicRuleEngine {
         let active = self.app_checker.get_active_development_tools();
         let lower: HashSet<String> = active.into_iter().map(|s| s.to_lowercase()).collect();
 
-        // Xcode
-        if lower.contains("xcode") || lower.contains("xcodebuild") {
+        // Helper to check if path exists
+        let path_exists = |p: &str| {
+            let expanded = Self::expand_home(p);
+            std::path::Path::new(&expanded).exists()
+        };
+
+        // Xcode - Check for existence, not just if running
+        if lower.contains("xcode") || path_exists("~/Library/Developer/Xcode/DerivedData") {
             rules.push(CategoryRule {
-                name: "Xcode DerivedData (Active)".to_string(),
+                name: "Xcode DerivedData".to_string(),
                 paths: vec!["~/Library/Developer/Xcode/DerivedData".to_string()],
                 safe: true,
                 advanced: Some(false),
                 max_depth: Some(4),
-                min_age_days: Some(2),
+                min_age_days: Some(1), // DerivedData is safe to rebuild
                 min_size_kb: None,
                 excludes: None,
                 extensions: None,
@@ -40,11 +46,7 @@ impl DynamicRuleEngine {
         }
 
         // Node / npm / yarn
-        if lower.contains("node")
-            || lower.contains("npm")
-            || lower.contains("yarn")
-            || lower.contains("pnpm")
-        {
+        if lower.contains("node") || path_exists("~/.npm") {
             rules.push(CategoryRule {
                 name: "Node Package Cache".to_string(),
                 paths: vec!["~/.npm".to_string()],
@@ -60,11 +62,7 @@ impl DynamicRuleEngine {
         }
 
         // Python / pip
-        if lower.contains("python")
-            || lower.contains("python3")
-            || lower.contains("pip")
-            || lower.contains("pip3")
-        {
+        if lower.contains("python") || path_exists("~/Library/Caches/pip") {
             rules.push(CategoryRule {
                 name: "Pip Cache".to_string(),
                 paths: vec!["~/Library/Caches/pip".to_string()],
@@ -80,7 +78,7 @@ impl DynamicRuleEngine {
         }
 
         // Rust / cargo
-        if lower.contains("cargo") || lower.contains("rustc") {
+        if lower.contains("cargo") || path_exists("~/.cargo/registry/cache") {
             rules.push(CategoryRule {
                 name: "Cargo Registry Cache".to_string(),
                 paths: vec!["~/.cargo/registry/cache".to_string()],
@@ -100,7 +98,7 @@ impl DynamicRuleEngine {
         }
 
         // Go
-        if lower.contains("go") || lower.contains("golang") {
+        if lower.contains("go") || path_exists("~/go/pkg/mod/cache") {
             rules.push(CategoryRule {
                 name: "Go Module Cache".to_string(),
                 paths: vec!["~/go/pkg/mod/cache".to_string()],
@@ -111,6 +109,38 @@ impl DynamicRuleEngine {
                 min_size_kb: None,
                 excludes: None,
                 extensions: None,
+                require_subpaths: None,
+            });
+        }
+
+        // CocoaPods
+        if path_exists("~/.cocoapods/checkouts") {
+            rules.push(CategoryRule {
+                name: "CocoaPods Cache".to_string(),
+                paths: vec!["~/.cocoapods/checkouts".to_string()],
+                safe: true,
+                advanced: Some(true),
+                max_depth: Some(6),
+                min_age_days: Some(30),
+                min_size_kb: None,
+                excludes: None,
+                extensions: None,
+                require_subpaths: None,
+            });
+        }
+
+        // Docker
+        if path_exists("~/Library/Containers/com.docker.docker/Data/log") {
+            rules.push(CategoryRule {
+                name: "Docker Logs".to_string(),
+                paths: vec!["~/Library/Containers/com.docker.docker/Data/log".to_string()],
+                safe: true,
+                advanced: Some(false),
+                max_depth: Some(2),
+                min_age_days: Some(3),
+                min_size_kb: None,
+                excludes: None,
+                extensions: Some(vec!["log".to_string()]),
                 require_subpaths: None,
             });
         }

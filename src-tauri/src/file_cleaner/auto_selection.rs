@@ -507,6 +507,7 @@ pub enum UserAction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct UserPatternData {
     pub selection_history: HashMap<String, SelectionPattern>,
     pub category_preferences: HashMap<String, f32>,

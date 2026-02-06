@@ -7,16 +7,17 @@
     --pure-white: #ffffff;
     --pure-black: #0b0b0b;
 
-    --gray-50: #f8f8f8;
-    --gray-100: #f1f1f1;
-    --gray-200: #e6e6e6;
-    --gray-300: #d6d6d6;
-    --gray-400: #bfbfbf;
-    --gray-500: #9a9a9a;
-    --gray-600: #6c6c6c;
-    --gray-700: #4a4a4a;
-    --gray-800: #2f2f2f;
+    --gray-50: #fafafa;
+    --gray-100: #f2f2f2;
+    --gray-200: #e5e5e5;
+    --gray-300: #d4d4d4;
+    --gray-400: #b8b8b8;
+    --gray-500: #939393;
+    --gray-600: #686868;
+    --gray-700: #484848;
+    --gray-800: #2d2d2d;
     --gray-900: #1a1a1a;
+    --gray-950: #111111;
 
     /* Surface + text */
     --bg-primary: var(--gray-50);
@@ -31,9 +32,9 @@
     --text-tertiary: #6f6f6f;
     --text-inverse: #f7f7f7;
 
-    --border-subtle: #e7e7e7;
-    --border-default: #d5d5d5;
-    --border-strong: #bcbcbc;
+    --border-subtle: rgba(0, 0, 0, 0.06);
+    --border-default: rgba(0, 0, 0, 0.10);
+    --border-strong: rgba(0, 0, 0, 0.18);
 
     --accent-primary: #111111;
     --accent-hover: #000000;
@@ -49,20 +50,26 @@
     --sidebar-active-icon-bg: rgba(17, 17, 17, 0.9);
     --sidebar-active-icon-color: var(--pure-white);
 
-    /* Depth */
-    --shadow-xs: 0 1px 2px rgba(17, 17, 17, 0.05);
-    --shadow-sm: 0 8px 24px rgba(17, 17, 17, 0.06);
-    --shadow-md: 0 12px 32px rgba(17, 17, 17, 0.08);
-    --shadow-lg: 0 20px 48px rgba(17, 17, 17, 0.10);
-    --shadow-xl: 0 32px 65px rgba(17, 17, 17, 0.12);
-    --shadow-inner: inset 0 2px 4px rgba(17, 17, 17, 0.05);
-    --shadow-glow: 0 0 0 1px rgba(17, 17, 17, 0.08);
+    /* Depth - layered shadows for realism */
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04),
+                 0 1px 1px rgba(0, 0, 0, 0.02);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04),
+                 0 4px 12px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.04),
+                 0 8px 24px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.04),
+                 0 16px 40px rgba(0, 0, 0, 0.08);
+    --shadow-xl: 0 8px 16px rgba(0, 0, 0, 0.06),
+                 0 24px 56px rgba(0, 0, 0, 0.10);
+    --shadow-inner: inset 0 1px 3px rgba(0, 0, 0, 0.06);
+    --shadow-glow: 0 0 0 1px rgba(0, 0, 0, 0.06);
+    --shadow-ring: 0 0 0 3px rgba(0, 0, 0, 0.05);
 
     /* Gradients + textures (kept muted) */
     --gradient-subtle: linear-gradient(180deg, var(--pure-white) 0%, var(--gray-100) 100%);
     --gradient-strong: linear-gradient(180deg, #1a1a1a 0%, #2a2a2a 100%);
-    --gradient-radial: radial-gradient(circle at 50% 0%, rgba(0, 0, 0, 0.05) 0%, transparent 60%);
-    --gradient-mesh: linear-gradient(135deg, rgba(0, 0, 0, 0.02) 0%, transparent 55%);
+    --gradient-radial: radial-gradient(circle at 50% 0%, rgba(0, 0, 0, 0.04) 0%, transparent 60%);
+    --gradient-mesh: linear-gradient(135deg, rgba(0, 0, 0, 0.015) 0%, transparent 55%);
 
     --texture-dots: radial-gradient(circle, rgba(0, 0, 0, 0.08) 1px, transparent 1px);
     --texture-lines: repeating-linear-gradient(90deg, transparent, transparent 18px, rgba(0, 0, 0, 0.03) 18px, rgba(0, 0, 0, 0.03) 36px);
@@ -70,11 +77,12 @@
 
     /* Typography */
     --font-system: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --font-text: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     --font-mono: "SF Mono", "Fira Code", "Monaco", monospace;
 
-    /* Spacing scale */
+    /* Spacing scale (4px base) */
     --space-xs: 4px;
-    --space-sm: 10px;
+    --space-sm: 8px;
     --space-md: 16px;
     --space-lg: 24px;
     --space-xl: 32px;
@@ -84,16 +92,26 @@
     /* Radii */
     --radius-sm: 6px;
     --radius-md: 10px;
-    --radius-lg: 16px;
-    --radius-xl: 22px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
     --radius-2xl: 28px;
     --radius-full: 999px;
 
-    /* Motion */
-    --transition-fast: 140ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-base: 220ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-slow: 320ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-spring: 420ms cubic-bezier(0.25, 1.25, 0.5, 1);
+    /* Motion - Apple-like easing curves */
+    --ease-out: cubic-bezier(0.2, 0, 0, 1);
+    --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.1);
+    --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+    --transition-fast: 120ms var(--ease-out);
+    --transition-base: 200ms var(--ease-out);
+    --transition-slow: 320ms var(--ease-out);
+    --transition-spring: 400ms var(--ease-spring);
+    --transition-color: 160ms var(--ease-in-out);
+
+    /* Backdrop */
+    --backdrop-blur: blur(20px);
+    --backdrop-blur-heavy: blur(40px);
 
     /* Layers */
     --z-base: 0;
@@ -108,20 +126,20 @@
 
 @media (prefers-color-scheme: dark) {
     :root {
-        --bg-primary: var(--gray-900);
-        --bg-secondary: var(--gray-800);
-        --bg-tertiary: var(--gray-700);
-        --bg-elevated: #141414;
-        --bg-overlay: rgba(249, 249, 249, 0.08);
+        --bg-primary: #0f0f0f;
+        --bg-secondary: #1a1a1a;
+        --bg-tertiary: #262626;
+        --bg-elevated: #161616;
+        --bg-overlay: rgba(0, 0, 0, 0.55);
 
-        --text-primary: #f5f5f5;
-        --text-secondary: #d0d0d0;
-        --text-tertiary: #8a8a8a;
+        --text-primary: #f0f0f0;
+        --text-secondary: #a0a0a0;
+        --text-tertiary: #666666;
         --text-inverse: #0f0f0f;
 
-        --border-subtle: #2e2e2e;
-        --border-default: #3a3a3a;
-        --border-strong: #5a5a5a;
+        --border-subtle: rgba(255, 255, 255, 0.06);
+        --border-default: rgba(255, 255, 255, 0.10);
+        --border-strong: rgba(255, 255, 255, 0.18);
 
         --accent-primary: #f3f3f3;
         --accent-hover: #ffffff;
@@ -131,21 +149,25 @@
         --accent-contrast: #111111;
 
         /* Sidebar states */
-        --sidebar-active-bg: rgba(249, 249, 249, 0.98);
+        --sidebar-active-bg: rgba(255, 255, 255, 0.95);
         --sidebar-active-text: #111111;
-        --sidebar-active-indicator: rgba(0, 0, 0, 0.8);
+        --sidebar-active-indicator: rgba(255, 255, 255, 0.8);
         --sidebar-active-icon-bg: rgba(17, 17, 17, 0.85);
         --sidebar-active-icon-color: #f7f7f7;
 
-        --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
-        --shadow-sm: 0 12px 24px rgba(0, 0, 0, 0.45);
-        --shadow-md: 0 18px 40px rgba(0, 0, 0, 0.5);
-        --shadow-lg: 0 30px 60px rgba(0, 0, 0, 0.55);
-        --shadow-xl: 0 40px 80px rgba(0, 0, 0, 0.6);
+        --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3),
+                     0 6px 16px rgba(0, 0, 0, 0.2);
+        --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.3),
+                     0 12px 28px rgba(0, 0, 0, 0.25);
+        --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.3),
+                     0 20px 48px rgba(0, 0, 0, 0.3);
+        --shadow-xl: 0 8px 20px rgba(0, 0, 0, 0.35),
+                     0 32px 64px rgba(0, 0, 0, 0.35);
 
         --gradient-subtle: linear-gradient(180deg, #161616 0%, #121212 100%);
         --gradient-strong: linear-gradient(180deg, #f5f5f5 0%, #dcdcdc 100%);
-        --gradient-radial: radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.08) 0%, transparent 70%);
-        --gradient-mesh: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, transparent 55%);
+        --gradient-radial: radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.06) 0%, transparent 70%);
+        --gradient-mesh: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, transparent 55%);
     }
 }

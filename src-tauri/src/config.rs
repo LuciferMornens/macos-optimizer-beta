@@ -4,6 +4,7 @@ use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct PerformanceConfig {
     // Parallelism
     pub max_parallel_scans: usize,   // Default: num_cpus::get()

@@ -456,6 +456,7 @@ pub enum RecoveryMethod {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct RestoreResult {
     pub restored_count: usize,
     pub failed_count: usize,

@@ -7,15 +7,23 @@
     gap: 28px;
 }
 
+/* Search & Filter Bar */
 .processes-filter {
     display: flex;
-    gap: 16px;
+    gap: 14px;
     flex-wrap: wrap;
+    align-items: center;
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
-    padding: 20px 24px;
+    padding: 16px 20px;
     box-shadow: var(--shadow-xs);
+    transition: box-shadow var(--transition-fast);
+}
+
+.processes-filter:focus-within {
+    box-shadow: var(--shadow-sm);
+    border-color: var(--border-default);
 }
 
 .processes-filter input[type="text"],
@@ -23,17 +31,38 @@
     border-radius: var(--radius-md);
     border: 1px solid var(--border-subtle);
     padding: 10px 14px;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    outline: none;
+}
+
+.processes-filter input[type="text"]:focus,
+.processes-filter select:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(17, 17, 17, 0.06);
 }
 
 .processes-filter input[type="text"] {
     flex: 1 1 240px;
 }
 
-.processes-filter select {
-    flex: 0 0 200px;
+.processes-filter input[type="text"]::placeholder {
+    color: var(--text-tertiary);
 }
 
+.processes-filter select {
+    flex: 0 0 180px;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236c6c6c' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+}
+
+/* Process Stats Cards */
 .processes-stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -62,10 +91,11 @@
     color: var(--text-tertiary);
 }
 
+/* Processes Table */
 .processes-table {
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-xl);
+    border-radius: var(--radius-lg);
     overflow: hidden;
     box-shadow: var(--shadow-sm);
 }
@@ -81,41 +111,150 @@
 
 .processes-table th,
 .processes-table td {
-    padding: 16px 20px;
+    padding: 13px 20px;
     text-align: left;
-    font-size: 0.85rem;
+    font-size: 0.84rem;
     border-bottom: 1px solid var(--border-subtle);
 }
 
 .processes-table th {
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.7rem;
+    font-size: 0.68rem;
+    font-weight: 600;
     color: var(--text-tertiary);
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    z-index: 1;
+    user-select: none;
 }
 
-.processes-table tbody tr:hover {
+/* Alternating row backgrounds */
+.processes-table tbody tr:nth-child(even) {
     background: var(--bg-secondary);
 }
 
+.processes-table tbody tr:nth-child(odd) {
+    background: var(--bg-elevated);
+}
+
+/* Row hover */
+.processes-table tbody tr {
+    transition: background var(--transition-fast);
+}
+
+.processes-table tbody tr:hover {
+    background: var(--bg-tertiary);
+}
+
+/* First column: process name emphasis */
 .processes-table td:first-child {
     font-weight: 500;
     color: var(--text-primary);
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
+/* PID column */
+.processes-table td:nth-child(2) {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+/* CPU/Memory columns */
+.processes-table td:nth-child(3),
+.processes-table td:nth-child(4) {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+/* Action column */
 .process-action {
     display: inline-flex;
     align-items: center;
     gap: 6px;
 }
 
+.process-action .btn {
+    padding: 5px 12px;
+    font-size: 0.72rem;
+}
+
+/* Last row no border */
+.processes-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* Responsive */
 @media (max-width: 720px) {
     .processes-filter {
-        padding: 18px;
+        padding: 14px 16px;
+    }
+
+    .processes-filter select {
+        flex: 1 1 auto;
     }
 
     .processes-table th,
     .processes-table td {
-        padding: 14px 16px;
+        padding: 11px 14px;
+        font-size: 0.8rem;
+    }
+
+    .processes-table td:first-child {
+        max-width: 180px;
+    }
+}
+
+/* Dark mode refinements */
+@media (prefers-color-scheme: dark) {
+    .processes-filter input[type="text"],
+    .processes-filter select {
+        background: var(--bg-secondary);
+        border-color: var(--border-subtle);
+        color: var(--text-primary);
+    }
+
+    .processes-filter input[type="text"]:focus,
+    .processes-filter select:focus {
+        border-color: var(--accent-primary);
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.06);
+    }
+
+    .processes-filter select {
+        background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238a8a8a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    }
+
+    .processes-table thead {
+        background: rgba(255, 255, 255, 0.04);
+    }
+
+    .processes-table th {
+        background: rgba(255, 255, 255, 0.04);
+    }
+
+    .processes-table tbody tr:nth-child(even) {
+        background: rgba(255, 255, 255, 0.02);
+    }
+
+    .processes-table tbody tr:nth-child(odd) {
+        background: transparent;
+    }
+
+    .processes-table tbody tr:hover {
+        background: rgba(255, 255, 255, 0.06);
+    }
+
+    .processes-table td {
+        border-color: rgba(255, 255, 255, 0.06);
+    }
+
+    .processes-table th {
+        border-color: rgba(255, 255, 255, 0.08);
     }
 }

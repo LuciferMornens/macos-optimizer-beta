@@ -1,6 +1,8 @@
 use crate::file_cleaner::enhanced_engine::{CleaningResult, DeletionPreparation};
 use crate::file_cleaner::smart_cache::AppActivityChecker;
 use crate::file_cleaner::telemetry::TelemetrySnapshot;
+#[cfg(feature = "cache-refresh")]
+use crate::file_cleaner::CacheRefresher;
 use crate::file_cleaner::{
     CleanableFile, CleaningReport, DryRunReport, EnhancedCleaningReport, EnhancedDeletionProgress,
     EnhancedFileCleaner, FileCleaner, RuleConflict, UserAction,
@@ -64,6 +66,8 @@ struct AppState {
     memory_optimizer: RwLock<MemoryOptimizer>,
     metrics_sampler: MetricsSampler,
     ops: OperationRegistry,
+    #[cfg(feature = "cache-refresh")]
+    cache_refresher: std::sync::Arc<CacheRefresher>,
 }
 
 fn sample_value<T: Clone>(envelope: &SampleEnvelope<T>, label: &str) -> Result<T, String> {
@@ -355,6 +359,8 @@ async fn scan_cleanable_files_enhanced(
         )
         .ok();
 
+    // Concurrency: limit scans (same guard used by baseline scan)
+    let _permit = state.ops.scan_sem.acquire().await;
     let mut cleaner = state.enhanced_file_cleaner.write().await;
 
     // Progress updates for enhanced scan
@@ -428,6 +434,7 @@ async fn scan_cleanable_files_enhanced(
             state.ops.finish_success(&operation_id);
         }
         Err(err) => {
+            let canceled = err.contains("cancelled");
             app_handle
                 .emit(
                     "operation:complete",
@@ -436,11 +443,11 @@ async fn scan_cleanable_files_enhanced(
                         success: false,
                         message: format!("Enhanced scan failed: {}", err),
                         duration,
-                        canceled: Some(false),
+                        canceled: Some(canceled),
                     },
                 )
                 .ok();
-            if err.contains("cancelled") {
+            if canceled {
                 state.ops.finish_canceled(&operation_id);
             } else {
                 state.ops.finish_failed(&operation_id, &err);
@@ -575,6 +582,7 @@ async fn clean_files_enhanced(
             state.ops.finish_success(&operation_id);
         }
         Err(err) => {
+            let canceled = err.contains("cancelled");
             app_handle
                 .emit(
                     "operation:complete",
@@ -583,11 +591,11 @@ async fn clean_files_enhanced(
                         success: false,
                         message: format!("Enhanced cleaning failed: {}", err),
                         duration: 0,
-                        canceled: Some(false),
+                        canceled: Some(canceled),
                     },
                 )
                 .ok();
-            if err.contains("cancelled") {
+            if canceled {
                 state.ops.finish_canceled(&operation_id);
             } else {
                 state.ops.finish_failed(&operation_id, &err);
@@ -659,6 +667,7 @@ async fn clean_files(
     file_paths: Vec<String>,
 ) -> Result<(u64, usize), String> {
     let (operation_id, token) = state.ops.register(OperationKind::FileClean, true);
+    let start_time = std::time::Instant::now();
     app_handle
         .emit(
             "operation:start",
@@ -694,9 +703,34 @@ async fn clean_files(
         if token.is_cancelled() {
             break;
         }
-        let (freed, removed) = cleaner
+        let chunk_result = cleaner
             .clean_files_with_cancel(chunk.to_vec(), &token)
-            .await?;
+            .await;
+        let (freed, removed) = match chunk_result {
+            Ok(result) => result,
+            Err(err) => {
+                let canceled = token.is_cancelled() || err.contains("cancelled");
+                let duration = start_time.elapsed().as_millis() as u32;
+                app_handle
+                    .emit(
+                        "operation:complete",
+                        OperationCompleteEvent {
+                            operation_id: operation_id.clone(),
+                            success: false,
+                            message: format!("Cleaning failed: {}", err),
+                            duration,
+                            canceled: Some(canceled),
+                        },
+                    )
+                    .ok();
+                if canceled {
+                    state.ops.finish_canceled(&operation_id);
+                } else {
+                    state.ops.finish_failed(&operation_id, &err);
+                }
+                return Err(err);
+            }
+        };
         total_freed += freed;
         total_removed += removed;
         files_done += chunk.len() as u64;
@@ -727,6 +761,7 @@ async fn clean_files(
     }
 
     let canceled = token.is_cancelled();
+    let duration = start_time.elapsed().as_millis() as u32;
     app_handle
         .emit(
             "operation:complete",
@@ -738,7 +773,7 @@ async fn clean_files(
                 } else {
                     "Cleaning completed".into()
                 },
-                duration: 0,
+                duration,
                 canceled: Some(canceled),
             },
         )
@@ -1206,6 +1241,8 @@ struct DashboardData {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let metrics_sampler = MetricsSampler::spawn();
+    #[cfg(feature = "cache-refresh")]
+    let cache_refresher = std::sync::Arc::new(CacheRefresher::new());
     let app_state = AppState {
         system_monitor: RwLock::new(SystemMonitor::new()),
         file_cleaner: RwLock::new(FileCleaner::new()),
@@ -1213,6 +1250,8 @@ pub fn run() {
         memory_optimizer: RwLock::new(MemoryOptimizer::new()),
         metrics_sampler,
         ops: OperationRegistry::new(1, 2, 1),
+        #[cfg(feature = "cache-refresh")]
+        cache_refresher,
     };
 
     tauri::Builder::default()
@@ -1225,6 +1264,29 @@ pub fn run() {
                 let _ = win.set_min_size(Some(min_size));
                 let _ = win.show();
                 let _ = win.set_focus();
+            }
+
+            #[cfg(feature = "cache-refresh")]
+            {
+                let state = app.state::<AppState>();
+                let refresher = state.cache_refresher.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Some(home) = dirs::home_dir() {
+                        let _ = refresher.add_monitored_path(home.join("Downloads")).await;
+                        let _ = refresher
+                            .add_monitored_path(home.join("Library").join("Caches"))
+                            .await;
+                        let _ = refresher
+                            .add_monitored_path(
+                                home.join("Library")
+                                    .join("Developer")
+                                    .join("Xcode")
+                                    .join("DerivedData"),
+                            )
+                            .await;
+                    }
+                    refresher.start_background_refresh().await;
+                });
             }
             Ok(())
         })

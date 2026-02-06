@@ -20,13 +20,13 @@
     border-radius: var(--radius-lg);
     padding: 20px 22px;
     box-shadow: var(--shadow-sm);
-    animation: slideInRight 0.24s ease-out;
+    animation: slideInRight 0.32s var(--transition-spring);
     display: grid;
     gap: 14px;
 }
 
 .operation-progress.fade-out {
-    animation: fadeOut 0.2s ease-out;
+    animation: fadeOut 0.25s ease-out forwards;
     opacity: 0;
 }
 
@@ -53,6 +53,7 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-tertiary);
+    transition: color var(--transition-fast);
 }
 
 .progress-cancel {
@@ -60,6 +61,12 @@
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: var(--text-secondary);
+    cursor: pointer;
+    transition: color var(--transition-fast);
+}
+
+.progress-cancel:hover {
+    color: var(--text-primary);
 }
 
 .progress-bar-track {
@@ -67,18 +74,51 @@
     border-radius: 999px;
     height: 6px;
     overflow: hidden;
+    position: relative;
 }
 
 .progress-bar-fill {
     height: 100%;
     background: var(--accent-primary);
-    transition: width var(--transition-base);
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     border-radius: 999px;
+    position: relative;
+    overflow: hidden;
+}
+
+.progress-bar-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.25) 50%,
+        transparent 100%
+    );
+    animation: progress-shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes progress-shimmer {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(100%);
+    }
 }
 
 .progress-bar-fill.near-complete,
 .progress-bar-fill.complete {
     background: var(--accent-primary);
+}
+
+.progress-bar-fill.complete::after {
+    animation: none;
+    opacity: 0;
 }
 
 .progress-footer {
@@ -118,7 +158,7 @@
 
 .activity-indicator.show {
     display: flex;
-    animation: slideInRight 0.24s ease-out;
+    animation: slideInRight 0.32s var(--transition-spring);
 }
 
 .activity-dot {
@@ -127,6 +167,17 @@
     border-radius: 50%;
     background: var(--accent-primary);
     animation: pulseSoft 1.6s ease-in-out infinite;
+}
+
+@keyframes pulseSoft {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.5;
+        transform: scale(0.85);
+    }
 }
 
 .activity-text {
@@ -147,11 +198,10 @@
 
 .skeleton-line {
     height: 12px;
-    border-radius: 999px;
+    border-radius: 4px;
     background: linear-gradient(90deg, rgba(0, 0, 0, 0.07) 0%, rgba(0, 0, 0, 0.18) 50%, rgba(0, 0, 0, 0.07) 100%);
     background-size: 200% 100%;
     animation: skeleton 1.3s ease-in-out infinite;
-    border-radius: 4px;
     margin-bottom: 12px;
 }
 
@@ -174,9 +224,9 @@
 .skeleton-progress {
     height: 6px;
     width: 100%;
-    background: linear-gradient(90deg, 
-        #007AFF 0%, 
-        #007AFF 30%, 
+    background: linear-gradient(90deg,
+        var(--accent-primary) 0%,
+        var(--accent-primary) 30%,
         var(--bg-secondary) 30%
     );
     background-size: 200% 100%;
@@ -193,7 +243,8 @@
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     display: none;
     align-items: center;
     justify-content: center;
@@ -220,7 +271,7 @@
 }
 
 .spinner .path {
-    stroke: #007AFF;
+    stroke: var(--accent-primary);
     stroke-linecap: round;
     animation: dash 1.5s ease-in-out infinite;
 }
@@ -272,10 +323,15 @@
     color: var(--text-secondary);
     border-left: 2px solid transparent;
     padding-left: 10px;
+    transition: background var(--transition-fast);
 }
 
 .history-item:last-child {
     border-bottom: none;
+}
+
+.history-item:hover {
+    background: rgba(17, 17, 17, 0.02);
 }
 
 .history-item.success {
@@ -334,6 +390,12 @@
     animation: spin 0.8s linear infinite;
 }
 
+@keyframes spin {
+    to {
+        transform: translate(-50%, -50%) rotate(360deg);
+    }
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .global-progress-container {
@@ -341,19 +403,19 @@
         left: 10px;
         width: auto;
     }
-    
+
     .activity-indicator {
         right: 10px;
         left: 10px;
         max-width: none;
     }
-    
+
     .operation-history {
         right: -100%;
         left: 10px;
         width: auto;
     }
-    
+
     .operation-history.show {
         right: 0;
     }
@@ -382,6 +444,16 @@
     }
 }
 
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes fadeOut {
+    from { opacity: 1; transform: translateX(0); }
+    to { opacity: 0; transform: translateX(40px); }
+}
+
 @keyframes skeleton {
     0% {
         background-position: -200px 0;
@@ -392,8 +464,8 @@
 }
 
 @keyframes rotate {
-    100% { 
-        transform: rotate(360deg); 
+    100% {
+        transform: rotate(360deg);
     }
 }
 
@@ -424,9 +496,9 @@
 /* High contrast mode support */
 @media (prefers-contrast: high) {
     .progress-bar-fill {
-        background: #007AFF;
+        background: var(--accent-primary);
     }
-    
+
     .skeleton-line {
         background: repeating-linear-gradient(
             90deg,
@@ -444,22 +516,27 @@
     .loading-overlay {
         animation: none;
     }
-    
+
     .progress-bar-fill {
         transition: none;
     }
-    
+
+    .progress-bar-fill::after {
+        animation: none;
+        display: none;
+    }
+
     .skeleton-line,
     .skeleton-progress {
         animation: none;
         background: var(--bg-tertiary);
     }
-    
+
     .spinner {
         animation: none;
     }
-    
-    .progress-bar-fill::after {
+
+    .activity-dot {
         animation: none;
     }
 }
@@ -469,12 +546,34 @@
     .loading-text {
         color: #ffffff;
     }
-    
+
     .skeleton-line {
-        background: linear-gradient(90deg, 
-            rgba(255,255,255,0.05) 25%, 
-            rgba(255,255,255,0.1) 50%, 
+        background: linear-gradient(90deg,
+            rgba(255,255,255,0.05) 25%,
+            rgba(255,255,255,0.1) 50%,
             rgba(255,255,255,0.05) 75%
         );
+    }
+
+    .progress-bar-fill {
+        background: var(--accent-primary);
+    }
+
+    .progress-bar-fill::after {
+        background: linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(255, 255, 255, 0.15) 50%,
+            transparent 100%
+        );
+    }
+
+    .history-item:hover {
+        background: rgba(255, 255, 255, 0.02);
+    }
+
+    .btn.loading::after {
+        border-color: rgba(255, 255, 255, 0.2);
+        border-top-color: rgba(255, 255, 255, 0.7);
     }
 }

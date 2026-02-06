@@ -24,6 +24,8 @@ pub use types::{CleanableFile, CleaningReport};
 
 // Enhanced engine with all safety features - used by lib.rs
 pub use auto_selection::UserAction;
+#[cfg(feature = "cache-refresh")]
+pub(crate) use cache::CacheRefresher;
 pub use enhanced_engine::{EnhancedCleaningReport, EnhancedDeletionProgress, EnhancedFileCleaner};
 #[cfg(feature = "app")]
 pub use enhanced_rules::{DryRunReport, DynamicRuleEngine, RuleConflict, RuleValidator};

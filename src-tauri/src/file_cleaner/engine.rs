@@ -21,6 +21,8 @@ use walkdir::WalkDir;
 use super::safety::{assess_path_risk, calculate_safety_score, RiskLevel};
 // Light build: metrics disabled to avoid unused code warnings.
 use super::cache::DIR_SIZE_CACHE;
+#[cfg(feature = "metadata-cache")]
+use super::cache::FILE_METADATA_CACHE;
 use super::types::{
     load_rules, load_rules_result, CategoryReport, CategoryRule, CleanableFile, CleanerRules,
     CleaningReport,
@@ -68,6 +70,7 @@ impl FileCleaner {
 
             let found_files = Arc::new(DashMap::new());
             let seen_paths = Arc::new(DashMap::new());
+            let seen_dir_prefixes = Arc::new(DashMap::new());
 
             let categories: Vec<_> = rules.categories.into_iter().collect();
             let (user_rules, system_rules): (Vec<_>, Vec<_>) =
@@ -79,6 +82,7 @@ impl FileCleaner {
 
             let found_files_clone = found_files.clone();
             let seen_paths_clone = seen_paths.clone();
+            let seen_dir_prefixes_clone = seen_dir_prefixes.clone();
             let token = cancel.clone();
             user_rules.par_iter().for_each(|rule| {
                 if token.is_cancelled() {
@@ -99,6 +103,7 @@ impl FileCleaner {
                         rule,
                         found_files_clone.clone(),
                         seen_paths_clone.clone(),
+                        seen_dir_prefixes_clone.clone(),
                         &token,
                     );
                 });
@@ -106,6 +111,7 @@ impl FileCleaner {
 
             let found_files_clone = found_files.clone();
             let seen_paths_clone = seen_paths.clone();
+            let seen_dir_prefixes_clone = seen_dir_prefixes.clone();
             let token = cancel.clone();
             system_rules.par_iter().for_each(|rule| {
                 if token.is_cancelled() {
@@ -126,13 +132,22 @@ impl FileCleaner {
                         rule,
                         found_files_clone.clone(),
                         seen_paths_clone.clone(),
+                        seen_dir_prefixes_clone.clone(),
                         &token,
                     );
                 }
             });
 
-            self.cleanable_files = found_files.iter().map(|e| e.value().clone()).collect();
-            self.seen_paths = seen_paths.iter().map(|e| e.key().clone()).collect();
+            self.cleanable_files = Self::prune_parallel_results(&found_files, &seen_dir_prefixes);
+            self.seen_paths = self
+                .cleanable_files
+                .iter()
+                .map(|file| file.path.to_lowercase())
+                .collect();
+            self.seen_dir_prefixes = seen_dir_prefixes
+                .iter()
+                .map(|prefix| prefix.key().clone())
+                .collect();
             if cancel.is_cancelled() {
                 return Err("cancelled".into());
             }
@@ -216,11 +231,16 @@ impl FileCleaner {
     ) -> Result<Vec<CleanableFile>, String> {
         let found_files = Arc::new(DashMap::new());
         let seen_paths = Arc::new(DashMap::new());
-        self.scan_path_parallel_with_cancel(path, rule, found_files.clone(), seen_paths, cancel)?;
-        let results = found_files
-            .iter()
-            .map(|entry| entry.value().clone())
-            .collect();
+        let seen_dir_prefixes = Arc::new(DashMap::new());
+        self.scan_path_parallel_with_cancel(
+            path,
+            rule,
+            found_files.clone(),
+            seen_paths,
+            seen_dir_prefixes.clone(),
+            cancel,
+        )?;
+        let results = Self::prune_parallel_results(&found_files, &seen_dir_prefixes);
         Ok(results)
     }
 
@@ -255,6 +275,7 @@ impl FileCleaner {
         rule: &CategoryRule,
         found_files: Arc<DashMap<String, CleanableFile>>,
         seen_paths: Arc<DashMap<String, bool>>,
+        seen_dir_prefixes: Arc<DashMap<String, bool>>,
         cancel: &CancellationToken,
     ) -> Result<(), String> {
         if !path.exists() {
@@ -272,15 +293,50 @@ impl FileCleaner {
                 }
                 let file_path = entry.path();
                 let path_str = file_path.to_string_lossy().to_string();
-                if seen_paths.contains_key(&path_str) {
+                let path_lower = path_str.to_lowercase();
+                if seen_paths.contains_key(&path_lower) {
+                    return;
+                }
+                if Self::has_seen_parent_prefix(&path_lower, &seen_dir_prefixes) {
                     return;
                 }
                 if let Some(cleanable) = self.process_entry(&entry, rule) {
+                    if entry.file_type().is_dir() {
+                        let mut dir_prefix = path_lower.clone();
+                        if !dir_prefix.ends_with('/') {
+                            dir_prefix.push('/');
+                        }
+                        seen_dir_prefixes.insert(dir_prefix, true);
+                    }
                     found_files.insert(path_str.clone(), cleanable);
-                    seen_paths.insert(path_str, true);
+                    seen_paths.insert(path_lower, true);
                 }
             });
         Ok(())
+    }
+
+    #[cfg(feature = "parallel-scan")]
+    fn has_seen_parent_prefix(path_lower: &str, seen_dir_prefixes: &DashMap<String, bool>) -> bool {
+        seen_dir_prefixes
+            .iter()
+            .any(|prefix| path_lower.starts_with(prefix.key()))
+    }
+
+    #[cfg(feature = "parallel-scan")]
+    fn prune_parallel_results(
+        found_files: &DashMap<String, CleanableFile>,
+        seen_dir_prefixes: &DashMap<String, bool>,
+    ) -> Vec<CleanableFile> {
+        found_files
+            .iter()
+            .filter_map(|entry| {
+                let path_lower = entry.key().to_lowercase();
+                if Self::has_seen_parent_prefix(&path_lower, seen_dir_prefixes) {
+                    return None;
+                }
+                Some(entry.value().clone())
+            })
+            .collect()
     }
 
     #[cfg(not(feature = "parallel-scan"))]
@@ -652,7 +708,7 @@ impl FileCleaner {
                     total_freed += item_size;
                     items_removed += 1;
                     if let Some(parent) = path.parent() {
-                        DIR_SIZE_CACHE.invalidate(parent).await;
+                        Self::invalidate_scan_caches(parent).await;
                     }
                     continue;
                 }
@@ -669,7 +725,7 @@ impl FileCleaner {
                             total_freed += item_size;
                             items_removed += 1;
                             if let Some(parent) = path.parent() {
-                                DIR_SIZE_CACHE.invalidate(parent).await;
+                                Self::invalidate_scan_caches(parent).await;
                             }
                         }
                         Err(e) => {
@@ -726,7 +782,7 @@ impl FileCleaner {
                             total_freed += p.size;
                             items_removed += 1;
                             if let Some(parent) = Path::new(&p.path).parent() {
-                                DIR_SIZE_CACHE.invalidate(parent).await;
+                                Self::invalidate_scan_caches(parent).await;
                             }
                         } else {
                             // Fallback check: try a final direct removal if elevation succeeded partially
@@ -739,7 +795,7 @@ impl FileCleaner {
                                 total_freed += p.size;
                                 items_removed += 1;
                                 if let Some(parent) = path.parent() {
-                                    DIR_SIZE_CACHE.invalidate(parent).await;
+                                    Self::invalidate_scan_caches(parent).await;
                                 }
                             } else {
                                 errors.push(format!(
@@ -1065,6 +1121,12 @@ impl FileCleaner {
             }
         }
         Some(PathBuf::from(input))
+    }
+
+    async fn invalidate_scan_caches(path: &Path) {
+        DIR_SIZE_CACHE.invalidate(path).await;
+        #[cfg(feature = "metadata-cache")]
+        FILE_METADATA_CACHE.invalidate(path).await;
     }
 }
 

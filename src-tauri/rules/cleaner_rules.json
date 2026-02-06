@@ -16,7 +16,9 @@
         "~/Library/Application Support/Google/Chrome/Default/Service Worker/CacheStorage",
         "~/Library/Caches/Microsoft Edge",
         "~/Library/Application Support/Microsoft Edge/Default/Service Worker/CacheStorage",
-        "~/Library/Caches/Firefox"
+        "~/Library/Caches/Firefox",
+        "~/Library/Caches/com.brave.Browser",
+        "~/Library/Caches/com.operasoftware.Opera"
       ],
       "safe": true,
       "max_depth": 5
@@ -31,8 +33,51 @@
         "Google/Chrome",
         "Microsoft Edge",
         "Firefox",
-        "QuickLook.thumbnailcache"
+        "QuickLook.thumbnailcache",
+        "com.spotify.client",
+        "com.brave.Browser",
+        "com.operasoftware.Opera",
+        "us.zoom.xos",
+        "com.microsoft.teams"
       ]
+    },
+    {
+      "name": "Communication App Caches",
+      "paths": [
+        "~/Library/Application Support/Slack/Cache",
+        "~/Library/Application Support/Slack/Service Worker/CacheStorage",
+        "~/Library/Application Support/discord/Cache",
+        "~/Library/Application Support/discord/Code Cache",
+        "~/Library/Application Support/Zoom/data/Cache",
+        "~/Library/Caches/us.zoom.xos",
+        "~/Library/Caches/com.microsoft.teams"
+      ],
+      "safe": true,
+      "max_depth": 5
+    },
+    {
+      "name": "Spotify Cache",
+      "paths": [
+        "~/Library/Caches/com.spotify.client/Data",
+        "~/Library/Application Support/Spotify/PersistentCache"
+      ],
+      "safe": true,
+      "max_depth": 4
+    },
+    {
+      "name": "Xcode Archives (Old)",
+      "paths": ["~/Library/Developer/Xcode/Archives"],
+      "safe": true,
+      "max_depth": 5,
+      "min_age_days": 30
+    },
+    {
+      "name": "iOS Device Support (Old)",
+      "paths": ["~/Library/Developer/Xcode/iOS DeviceSupport"],
+      "safe": true,
+      "max_depth": 2,
+      "min_age_days": 180,
+      "advanced": true
     },
     {
       "name": "QuickLook Cache",
@@ -155,8 +200,26 @@
       "extensions": ["ipsw"]
     },
     {
+      "name": "Old Screenshots (Desktop)",
+      "paths": ["~/Desktop"],
+      "safe": true,
+      "max_depth": 1,
+      "min_age_days": 60,
+      "extensions": ["png", "jpg"],
+      "require_subpaths": ["Screen Shot", "Screenshot"]
+    },
+    {
+      "name": "Old Screenshots (Documents)",
+      "paths": ["~/Documents"],
+      "safe": true,
+      "max_depth": 1,
+      "min_age_days": 60,
+      "extensions": ["png", "jpg"],
+      "require_subpaths": ["Screen Shot", "Screenshot"]
+    },
+    {
       "name": "Large Stale Files (Desktop/Downloads)",
-      "paths": ["~/Downloads", "~/Desktop"],
+      "paths": ["~/Downloads"],
       "safe": false,
       "max_depth": 2,
       "min_age_days": 90,

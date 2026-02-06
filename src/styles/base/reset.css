@@ -15,25 +15,31 @@ html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
+    tab-size: 4;
+    scroll-behavior: smooth;
 }
 
 body {
     font-family: var(--font-system);
     background: var(--bg-primary);
     color: var(--text-primary);
-    line-height: 1.6;
+    line-height: 1.5;
     min-height: 100vh;
     overflow: hidden;
+    -webkit-font-smoothing: antialiased;
 }
 
 /* Reset common elements */
 h1, h2, h3, h4, h5, h6 {
     font-weight: 600;
-    line-height: 1.3;
+    line-height: 1.25;
+    text-wrap: balance;
 }
 
 p {
     line-height: 1.6;
+    text-wrap: pretty;
 }
 
 a {
@@ -59,12 +65,18 @@ button {
     cursor: pointer;
     background: none;
     border: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
-/* Custom scrollbar */
+/* Prevent text resize on orientation change */
+input, textarea {
+    -webkit-text-size-adjust: 100%;
+}
+
+/* Custom scrollbar - macOS-like thin overlay */
 ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -72,18 +84,26 @@ button {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: rgba(17, 17, 17, 0.2);
-    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: var(--radius-full);
+    border: 1px solid transparent;
+    background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: rgba(17, 17, 17, 0.35);
+    background: rgba(0, 0, 0, 0.3);
+    background-clip: padding-box;
 }
 
-/* Focus styles */
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+/* Focus styles - macOS-like ring */
 :focus-visible {
-    outline: 2px solid rgba(17, 17, 17, 0.45);
-    outline-offset: 3px;
+    outline: 2px solid rgba(0, 0, 0, 0.25);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
 }
 
 /* Selection styles */
@@ -92,9 +112,24 @@ button {
     color: var(--pure-white);
 }
 
+/* Dark mode overrides */
 @media (prefers-color-scheme: dark) {
     ::selection {
         background: var(--pure-white);
         color: var(--pure-black);
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.12);
+        background-clip: padding-box;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.25);
+        background-clip: padding-box;
+    }
+
+    :focus-visible {
+        outline-color: rgba(255, 255, 255, 0.3);
     }
 }

@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "dev": "OS_ACTIVITY_MODE=disable tauri dev --features app",
-    "build": "tauri build --features app"
+    "dev": "tauri dev --features app,parallel-scan,metrics,metadata-cache,cache-refresh",
+    "build": "tauri build --features app,parallel-scan,metrics,metadata-cache,cache-refresh"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

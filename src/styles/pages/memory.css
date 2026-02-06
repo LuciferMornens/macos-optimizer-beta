@@ -4,9 +4,10 @@
 
 .memory-overview {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    gap: 28px;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 24px;
     margin-bottom: 32px;
+    align-items: start;
 }
 
 .memory-chart {
@@ -14,39 +15,82 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-xl);
     padding: 32px;
-    min-height: 360px;
+    min-height: 340px;
     display: grid;
     place-items: center;
     box-shadow: var(--shadow-sm);
+    transition: box-shadow var(--transition-base);
+}
+
+.memory-chart:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.memory-chart canvas {
+    max-width: 100%;
+    height: auto;
 }
 
 .memory-stats {
     display: grid;
-    gap: 14px;
+    gap: 10px;
+    align-content: start;
 }
 
 .memory-stat {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 16px 20px;
-    border-radius: var(--radius-lg);
+    padding: 14px 18px;
+    border-radius: var(--radius-md);
     border: 1px solid var(--border-subtle);
     background: var(--bg-elevated);
     box-shadow: var(--shadow-xs);
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+}
+
+.memory-stat:hover {
+    transform: translateX(3px);
+    box-shadow: var(--shadow-sm);
+    background: var(--bg-secondary);
 }
 
 .memory-stat .label {
-    font-size: 0.75rem;
+    font-size: 0.73rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-tertiary);
 }
 
 .memory-stat .value {
-    font-size: 1.15rem;
+    font-size: 1.1rem;
     font-weight: 600;
     color: var(--text-primary);
+    font-family: var(--font-mono);
+    letter-spacing: -0.01em;
+}
+
+/* Staggered entrance for memory stats */
+.memory-stat {
+    opacity: 0;
+    animation: memoryStatReveal 0.35s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+.memory-stat:nth-child(1) { animation-delay: 60ms; }
+.memory-stat:nth-child(2) { animation-delay: 120ms; }
+.memory-stat:nth-child(3) { animation-delay: 180ms; }
+.memory-stat:nth-child(4) { animation-delay: 240ms; }
+.memory-stat:nth-child(5) { animation-delay: 300ms; }
+
+@keyframes memoryStatReveal {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
 }
 
 .memory-progress-container {
@@ -71,26 +115,41 @@
 
 .memory-processes-list {
     display: grid;
-    gap: 12px;
+    gap: 8px;
     max-height: 420px;
     overflow-y: auto;
     padding-right: 4px;
+}
+
+/* Styled scrollbar for memory processes */
+.memory-processes-list::-webkit-scrollbar {
+    width: 5px;
+}
+
+.memory-processes-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.memory-processes-list::-webkit-scrollbar-thumb {
+    background: var(--border-default);
+    border-radius: 999px;
 }
 
 .memory-process-item {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 20px;
-    padding: 14px 18px;
+    padding: 12px 16px;
     border-radius: var(--radius-md);
     border: 1px solid var(--border-subtle);
     background: var(--bg-secondary);
-    font-size: 0.9rem;
-    transition: background var(--transition-fast), transform var(--transition-fast);
+    font-size: 0.875rem;
+    transition: background var(--transition-fast), transform var(--transition-fast), border-color var(--transition-fast);
 }
 
 .memory-process-item:hover {
     background: var(--bg-tertiary);
+    border-color: var(--border-default);
     transform: translateX(3px);
 }
 
@@ -108,27 +167,94 @@
     color: var(--text-secondary);
 }
 
+/* Optimization Results */
 .optimization-result {
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
-    padding: 24px;
-    margin-top: 28px;
-    box-shadow: var(--shadow-xs);
+    padding: 28px;
+    margin-top: 24px;
+    box-shadow: var(--shadow-sm);
+    animation: fadeInUp 0.4s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .optimization-result h3 {
-    font-size: 1.1rem;
-    margin-bottom: 14px;
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Responsive: stack chart and stats vertically */
+@media (max-width: 800px) {
+    .memory-overview {
+        grid-template-columns: 1fr;
+    }
+
+    .memory-chart {
+        min-height: 280px;
+        padding: 24px;
+    }
 }
 
 @media (max-width: 640px) {
     .memory-process-item {
         grid-template-columns: 1fr;
-        gap: 10px;
+        gap: 8px;
     }
 
     .memory-processes {
         padding: 20px;
+    }
+
+    .optimization-result {
+        padding: 22px;
+    }
+}
+
+/* Dark mode refinements */
+@media (prefers-color-scheme: dark) {
+    .memory-chart {
+        background: var(--bg-elevated);
+        border-color: var(--border-subtle);
+    }
+
+    .memory-stat {
+        background: var(--bg-elevated);
+        border-color: var(--border-subtle);
+    }
+
+    .memory-stat:hover {
+        background: rgba(255, 255, 255, 0.06);
+    }
+
+    .memory-process-item {
+        background: rgba(255, 255, 255, 0.04);
+        border-color: var(--border-subtle);
+    }
+
+    .memory-process-item:hover {
+        background: rgba(255, 255, 255, 0.08);
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    .memory-stat,
+    .optimization-result {
+        animation: none;
+        opacity: 1;
     }
 }

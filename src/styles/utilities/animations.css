@@ -2,7 +2,7 @@
    Animation Utilities
    ======================================== */
 
-/* Fade Animations */
+/* ---- Fade Animations ---- */
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -43,7 +43,18 @@
     }
 }
 
-/* Slide Animations */
+@keyframes fadeInScale {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* ---- Slide Animations ---- */
 @keyframes slideInLeft {
     from {
         transform: translateX(-100%);
@@ -84,7 +95,7 @@
     }
 }
 
-/* Scale Animations */
+/* ---- Scale Animations ---- */
 @keyframes scaleIn {
     from {
         transform: scale(0);
@@ -116,7 +127,7 @@
     }
 }
 
-/* Rotation Animations */
+/* ---- Rotation Animations ---- */
 @keyframes spin {
     from {
         transform: rotate(0deg);
@@ -147,7 +158,7 @@
     }
 }
 
-/* Pulse Animations */
+/* ---- Pulse Animations ---- */
 @keyframes pulse {
     0% {
         box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.4);
@@ -169,7 +180,7 @@
     }
 }
 
-/* Shimmer Effect */
+/* ---- Shimmer Effect ---- */
 @keyframes shimmer {
     0% {
         background-position: -1000px 0;
@@ -188,7 +199,7 @@
     }
 }
 
-/* Bounce Animations */
+/* ---- Bounce Animations ---- */
 @keyframes bounce {
     0%, 100% {
         transform: translateY(0);
@@ -215,7 +226,7 @@
     }
 }
 
-/* Wave Animation */
+/* ---- Wave Animation ---- */
 @keyframes wave {
     0%, 100% {
         transform: translateY(0);
@@ -228,7 +239,7 @@
     }
 }
 
-/* Gradient Animations */
+/* ---- Gradient Animations ---- */
 @keyframes gradientShift {
     0% {
         background-position: 0% 50%;
@@ -250,7 +261,7 @@
     }
 }
 
-/* Loading Animations */
+/* ---- Loading Animations ---- */
 @keyframes loadingDots {
     0%, 80%, 100% {
         opacity: 0;
@@ -278,7 +289,7 @@
     }
 }
 
-/* Ripple Effect */
+/* ---- Ripple Effect ---- */
 @keyframes ripple {
     0% {
         transform: scale(0);
@@ -290,7 +301,7 @@
     }
 }
 
-/* Shake Animation */
+/* ---- Shake Animation ---- */
 @keyframes shake {
     0%, 100% {
         transform: translateX(0);
@@ -303,7 +314,7 @@
     }
 }
 
-/* Glow Animation */
+/* ---- Glow Animation ---- */
 @keyframes glow {
     0%, 100% {
         box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
@@ -313,13 +324,85 @@
     }
 }
 
-/* Animation Classes */
+/* ---- Page Transition ---- */
+@keyframes pageEnter {
+    from {
+        opacity: 0;
+        transform: translateY(14px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes pageExit {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+}
+
+/* ---- Staggered Card Reveal ---- */
+@keyframes cardReveal {
+    from {
+        opacity: 0;
+        transform: translateY(16px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* ---- Skeleton Shimmer (Refined) ---- */
+@keyframes skeletonShimmer {
+    0% {
+        background-position: -400px 0;
+    }
+    100% {
+        background-position: 400px 0;
+    }
+}
+
+/* ---- Spinner Draw ---- */
+@keyframes spinnerDraw {
+    0% {
+        stroke-dasharray: 1, 150;
+        stroke-dashoffset: 0;
+    }
+    50% {
+        stroke-dasharray: 90, 150;
+        stroke-dashoffset: -35;
+    }
+    100% {
+        stroke-dasharray: 90, 150;
+        stroke-dashoffset: -124;
+    }
+}
+
+/* ========================================
+   Animation Utility Classes
+   ======================================== */
+
 .animate-fadeIn {
     animation: fadeIn var(--transition-base);
 }
 
 .animate-fadeOut {
     animation: fadeOut var(--transition-base);
+}
+
+.animate-fadeInUp {
+    animation: fadeInUp 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.animate-fadeInScale {
+    animation: fadeInScale 0.35s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .animate-slideInLeft {
@@ -357,7 +440,22 @@
     animation: shimmer 1.5s ease-in-out infinite;
 }
 
-/* Transition Utilities */
+/* Page enter animation for tab content */
+.animate-pageEnter {
+    animation: pageEnter 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.animate-pageExit {
+    animation: pageExit 0.2s cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* Staggered card reveal class */
+.animate-cardReveal {
+    opacity: 0;
+    animation: cardReveal 0.45s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+/* ---- Transition Utilities ---- */
 .transition-none {
     transition: none;
 }
@@ -378,7 +476,7 @@
     transition: all var(--transition-spring);
 }
 
-/* Animation Delays */
+/* ---- Animation Delays (Stagger System) ---- */
 .delay-100 {
     animation-delay: 100ms;
 }
@@ -399,7 +497,17 @@
     animation-delay: 500ms;
 }
 
-/* Animation Durations */
+/* Fine-grained stagger delays for card lists */
+.stagger-1 { animation-delay: 40ms; }
+.stagger-2 { animation-delay: 80ms; }
+.stagger-3 { animation-delay: 120ms; }
+.stagger-4 { animation-delay: 160ms; }
+.stagger-5 { animation-delay: 200ms; }
+.stagger-6 { animation-delay: 240ms; }
+.stagger-7 { animation-delay: 280ms; }
+.stagger-8 { animation-delay: 320ms; }
+
+/* ---- Animation Durations ---- */
 .duration-fast {
     animation-duration: 150ms;
 }
@@ -416,14 +524,26 @@
     animation-duration: 500ms;
 }
 
-/* Hover Animations */
+/* ---- Hover Animations ---- */
+.hover-lift {
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
 .hover-lift:hover {
     transform: translateY(-4px);
     box-shadow: var(--shadow-lg);
 }
 
+.hover-grow {
+    transition: transform var(--transition-fast);
+}
+
 .hover-grow:hover {
     transform: scale(1.05);
+}
+
+.hover-shrink {
+    transition: transform var(--transition-fast);
 }
 
 .hover-shrink:hover {
@@ -434,15 +554,50 @@
     transform: rotate(5deg);
 }
 
+.hover-shadow {
+    transition: box-shadow var(--transition-fast);
+}
+
 .hover-shadow:hover {
     box-shadow: var(--shadow-xl);
 }
 
-/* Active Animations */
+/* ---- Active Animations ---- */
 .active-scale:active {
     transform: scale(0.95);
 }
 
 .active-shadow:active {
     box-shadow: var(--shadow-inner);
+}
+
+/* ========================================
+   Page Transition Enhancement
+   ======================================== */
+
+/* Tab content page transitions */
+.tab-content.active {
+    animation: pageEnter 0.38s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* ========================================
+   Reduced Motion Support
+   ======================================== */
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+
+    .tab-content.active {
+        animation: none;
+    }
+
+    .animate-cardReveal {
+        opacity: 1;
+    }
 }

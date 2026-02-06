@@ -9,11 +9,15 @@
     border-radius: var(--radius-lg);
     padding: 24px;
     box-shadow: var(--shadow-sm);
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast), border var(--transition-fast);
+    transition:
+        transform var(--transition-base),
+        box-shadow var(--transition-base),
+        border-color var(--transition-base);
+    will-change: transform;
 }
 
 .card:hover {
-    transform: translateY(-2px);
+    transform: translateY(-3px);
     border-color: var(--border-default);
     box-shadow: var(--shadow-md);
 }
@@ -26,6 +30,17 @@
     box-shadow: var(--shadow-sm);
     display: grid;
     gap: 12px;
+    transition:
+        transform var(--transition-base),
+        box-shadow var(--transition-base),
+        border-color var(--transition-base);
+    will-change: transform;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--border-default);
 }
 
 .stat-header {
@@ -43,6 +58,7 @@
     font-weight: 700;
     color: var(--text-primary);
     letter-spacing: -0.02em;
+    transition: color var(--transition-fast);
 }
 
 .stat-detail {
@@ -57,8 +73,13 @@
     padding: 18px 20px;
     display: grid;
     gap: 10px;
-    transition: border var(--transition-base), transform var(--transition-base), box-shadow var(--transition-base);
+    transition:
+        border-color var(--transition-base),
+        transform var(--transition-base),
+        box-shadow var(--transition-base),
+        background var(--transition-base);
     cursor: pointer;
+    will-change: transform;
 }
 
 .category-card:hover {
@@ -67,9 +88,14 @@
     box-shadow: var(--shadow-sm);
 }
 
+.category-card:active {
+    transform: translateY(0) scale(0.985);
+    transition-duration: 80ms;
+}
+
 .category-card.selected {
     border-color: var(--accent-primary);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-md), 0 0 0 1px var(--accent-primary);
 }
 
 .category-card--risky {
@@ -86,6 +112,12 @@
     opacity: 0.45;
     cursor: default;
     box-shadow: none;
+}
+
+.category-card--empty:hover {
+    transform: none;
+    box-shadow: none;
+    border-color: var(--border-subtle);
 }
 
 .category-name {
@@ -115,12 +147,18 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     background: var(--bg-elevated);
-    transition: border var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+    transition:
+        border-color var(--transition-fast),
+        background var(--transition-fast),
+        transform var(--transition-fast),
+        box-shadow var(--transition-fast);
 }
 
 .file-item:hover {
-    border-color: var(--border-default);
     background: var(--bg-secondary);
+    border-color: var(--border-default);
+    transform: translateX(4px);
+    box-shadow: var(--shadow-xs);
 }
 
 .file-item--risky {
@@ -130,12 +168,6 @@
 .file-item--risky-enabled {
     border-color: rgba(17, 17, 17, 0.4);
     background: rgba(17, 17, 17, 0.06);
-}
-
-.file-item:hover {
-    background: var(--bg-secondary);
-    border-color: var(--border-default);
-    transform: translateX(4px);
 }
 
 .file-info {
@@ -201,6 +233,14 @@
     padding: var(--space-xl);
     position: relative;
     overflow: hidden;
+    transition:
+        box-shadow var(--transition-base),
+        border-color var(--transition-base);
+}
+
+.info-card:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--border-default);
 }
 
 .info-card::before {
@@ -223,6 +263,14 @@
     border-radius: var(--radius-xl);
     padding: var(--space-xl);
     position: relative;
+    transition:
+        box-shadow var(--transition-base),
+        border-color var(--transition-base);
+}
+
+.system-details:hover {
+    box-shadow: var(--shadow-sm);
+    border-color: var(--border-default);
 }
 
 .system-details h3 {
@@ -242,6 +290,11 @@
     justify-content: space-between;
     padding: var(--space-sm) 0;
     border-bottom: 1px solid var(--border-subtle);
+    transition: background var(--transition-fast);
+}
+
+.info-item:hover {
+    background: rgba(17, 17, 17, 0.02);
 }
 
 .info-label {
@@ -262,11 +315,19 @@
         background: var(--gray-100);
         color: var(--gray-900);
     }
-    
+
     .stat-value {
         background: linear-gradient(135deg, var(--gray-100) 0%, var(--gray-300) 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
+    }
+
+    .info-item:hover {
+        background: rgba(255, 255, 255, 0.02);
+    }
+
+    .file-item:hover {
+        background: rgba(255, 255, 255, 0.04);
     }
 }

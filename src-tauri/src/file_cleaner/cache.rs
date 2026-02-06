@@ -212,6 +212,22 @@ impl CacheRefresher {
                         .await;
                 }
 
+                // Keep file-level safety metadata warm and throttle aggressive refreshes
+                // for large or lower-safety entries.
+                if let Some(meta) = self.file_cache.get_or_fetch(path).await {
+                    let mut extra_delay_ms = 0u64;
+                    if !meta.is_safe || meta.safety_score < 60 {
+                        extra_delay_ms = 150;
+                    } else if meta.size > 512 * 1024 * 1024 {
+                        extra_delay_ms = 120;
+                    } else if meta.modified > SystemTime::now() {
+                        extra_delay_ms = 20;
+                    }
+                    if extra_delay_ms > 0 {
+                        tokio::time::sleep(Duration::from_millis(extra_delay_ms)).await;
+                    }
+                }
+
                 // Small delay to avoid CPU spike
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }

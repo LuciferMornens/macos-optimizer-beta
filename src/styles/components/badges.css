@@ -3,7 +3,7 @@
    ======================================== */
 
 /* Base Badge */
- .badge {
+.badge {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -16,6 +16,13 @@
     border: 1px solid var(--border-subtle);
     background: var(--bg-secondary);
     color: var(--text-secondary);
+    transition:
+        background var(--transition-fast),
+        border-color var(--transition-fast),
+        color var(--transition-fast),
+        box-shadow var(--transition-fast),
+        transform var(--transition-fast);
+    white-space: nowrap;
 }
 
 .badge-default {
@@ -49,6 +56,10 @@
     place-items: center;
     font-size: 0.68rem;
     letter-spacing: 0.08em;
+    border: none;
+    transition:
+        transform var(--transition-fast),
+        box-shadow var(--transition-fast);
 }
 
 .badge-dot {
@@ -56,6 +67,7 @@
     height: 6px;
     border-radius: 999px;
     background: currentColor;
+    flex-shrink: 0;
 }
 
 .badge-group {
@@ -67,9 +79,13 @@
 .safety-badge {
     font-size: 0.7rem;
     font-weight: 600;
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     padding: 4px 10px;
     border: 1px solid var(--border-subtle);
+    transition:
+        background var(--transition-fast),
+        border-color var(--transition-fast),
+        transform var(--transition-fast);
 }
 
 .safety-very-high {
@@ -117,7 +133,6 @@
 .badge-with-icon {
     display: inline-flex;
     gap: 4px;
-}
     position: relative;
     animation: badge-glow 2s ease-in-out infinite;
 }
@@ -150,33 +165,52 @@
         color: var(--gray-200);
         border-color: var(--gray-700);
     }
-    
+
     .safety-very-high {
         background: linear-gradient(135deg, var(--gray-100) 0%, var(--gray-200) 100%);
         color: var(--gray-900);
         border-color: var(--gray-100);
     }
-    
+
     .safety-high {
         background: var(--gray-200);
         color: var(--gray-900);
         border-color: var(--gray-300);
     }
-    
+
     .safety-medium {
         background: var(--gray-700);
         color: var(--gray-100);
         border-color: var(--gray-600);
     }
-    
+
     .safety-low {
         background: var(--gray-900);
         color: var(--gray-100);
         border-color: var(--gray-800);
     }
-    
+
     .badge-count {
         background: var(--gray-100);
         color: var(--gray-900);
+    }
+
+    .safety-risk,
+    .badge-risk {
+        border-color: rgba(255, 255, 255, 0.25);
+        background: rgba(255, 255, 255, 0.06);
+    }
+
+    .badge-with-icon {
+        animation-name: badge-glow-dark;
+    }
+}
+
+@keyframes badge-glow-dark {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.08);
+    }
+    50% {
+        box-shadow: 0 0 10px 2px rgba(255, 255, 255, 0.08);
     }
 }

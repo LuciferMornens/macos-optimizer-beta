@@ -8,31 +8,38 @@
     inset: 0;
     display: grid;
     place-items: center;
-    background: rgba(17, 17, 17, 0.55);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    background: rgba(17, 17, 17, 0.45);
+    backdrop-filter: blur(16px) saturate(1.1);
+    -webkit-backdrop-filter: blur(16px) saturate(1.1);
     z-index: var(--z-modal);
-    animation: modal-fade 0.2s ease-out;
+    animation: modal-fade 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 @keyframes modal-fade {
     from {
         opacity: 0;
+        backdrop-filter: blur(0px);
+        -webkit-backdrop-filter: blur(0px);
     }
     to {
         opacity: 1;
+        backdrop-filter: blur(16px) saturate(1.1);
+        -webkit-backdrop-filter: blur(16px) saturate(1.1);
     }
 }
 
 .modal-card {
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
-    border-radius: 20px;
+    border-radius: var(--radius-xl);
     padding: 32px;
     width: min(480px, calc(100vw - 48px));
-    box-shadow: 0 28px 68px rgba(17, 17, 17, 0.24);
+    box-shadow:
+        0 32px 72px rgba(17, 17, 17, 0.22),
+        0 12px 24px rgba(17, 17, 17, 0.1),
+        0 0 0 1px rgba(17, 17, 17, 0.04);
     color: var(--text-primary);
-    animation: modal-rise 0.24s var(--transition-spring) forwards;
+    animation: modal-rise 0.35s var(--transition-spring) forwards;
     display: grid;
     gap: 24px;
 }
@@ -40,7 +47,7 @@
 @keyframes modal-rise {
     from {
         opacity: 0;
-        transform: translateY(18px) scale(0.97);
+        transform: translateY(24px) scale(0.96);
     }
     to {
         opacity: 1;
@@ -74,6 +81,7 @@
 
 .modal-card.modal-danger {
     border-style: dashed;
+    border-color: rgba(17, 17, 17, 0.3);
 }
 
 .modal-card.modal-success {
@@ -82,16 +90,37 @@
 
 @media (prefers-color-scheme: dark) {
     .modal-overlay {
-        background: rgba(0, 0, 0, 0.75);
+        background: rgba(0, 0, 0, 0.65);
+    }
+
+    @keyframes modal-fade {
+        from {
+            opacity: 0;
+            backdrop-filter: blur(0px);
+            -webkit-backdrop-filter: blur(0px);
+        }
+        to {
+            opacity: 1;
+            backdrop-filter: blur(16px) saturate(1.1);
+            -webkit-backdrop-filter: blur(16px) saturate(1.1);
+        }
     }
 
     .modal-card {
         background: #141414;
         border-color: rgba(255, 255, 255, 0.08);
         color: rgba(255, 255, 255, 0.92);
+        box-shadow:
+            0 32px 72px rgba(0, 0, 0, 0.5),
+            0 12px 24px rgba(0, 0, 0, 0.3),
+            inset 0 1px 0 rgba(255, 255, 255, 0.04);
     }
 
     .modal-body {
         color: rgba(255, 255, 255, 0.7);
+    }
+
+    .modal-card.modal-danger {
+        border-color: rgba(255, 255, 255, 0.15);
     }
 }
