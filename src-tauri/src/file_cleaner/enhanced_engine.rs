@@ -597,6 +597,14 @@ impl EnhancedFileCleaner {
                 }
             }
             let path = PathBuf::from(&file.base.path);
+            let measured_size = if path.exists() {
+                self.base_cleaner
+                    .get_path_size_async(&path)
+                    .await
+                    .unwrap_or(file.base.size)
+            } else {
+                0
+            };
             let base_score = file.safety_metrics.base_score;
 
             // Double-check safety
@@ -622,7 +630,8 @@ impl EnhancedFileCleaner {
 
             if deleted {
                 deleted_files.push(file.base.path.clone());
-                total_freed += file.base.size;
+                total_freed = total_freed.saturating_add(measured_size);
+                FileCleaner::invalidate_scan_caches(&path).await;
 
                 // Record user action for learning
                 self.auto_selector
@@ -635,7 +644,7 @@ impl EnhancedFileCleaner {
             }
 
             processed_files += 1;
-            processed_bytes = processed_bytes.saturating_add(file.base.size);
+            processed_bytes = processed_bytes.saturating_add(measured_size);
             let progress_factor = if total_files > 0 {
                 processed_files as f32 / total_files as f32
             } else {
@@ -681,11 +690,15 @@ impl EnhancedFileCleaner {
     async fn move_to_trash(&self, path: &Path) -> bool {
         // Prefer Finder deletion (moves to Trash per-volume)
         if !Self::is_osascript_disabled() {
+            let escaped = path
+                .to_string_lossy()
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"");
             match tokio::process::Command::new("osascript")
                 .arg("-e")
                 .arg(format!(
                     "tell application \"Finder\" to move POSIX file \"{}\" to trash",
-                    path.display()
+                    escaped
                 ))
                 .output()
                 .await

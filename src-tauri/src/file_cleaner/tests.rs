@@ -331,6 +331,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_pre_deletion_validator_lock_check_degraded_requires_confirmation() {
+        let validator = validation::PreDeletionValidator::with_file_lock_checker(
+            validation::FileLockChecker::with_lsof_program(None),
+        );
+
+        let files = vec![types::CleanableFile {
+            path: "/tmp/test_file.txt".to_string(),
+            size: 1024,
+            category: "Temporary Files".to_string(),
+            description: "Temp file".to_string(),
+            last_modified: 0,
+            safe_to_delete: true,
+            safety_score: 95,
+            auto_select: true,
+        }];
+
+        let result = validator.validate_before_deletion(&files).await;
+        let state = result.file_states.get(&PathBuf::from("/tmp/test_file.txt"));
+        assert!(
+            matches!(
+                state,
+                Some(validation::FileValidationState::RequiresConfirmation)
+            ),
+            "expected RequiresConfirmation when lock checks are degraded, got: {:?}",
+            state
+        );
+        assert!(result.warnings.iter().any(|warning| matches!(
+            warning.warning_type,
+            validation::WarningType::LockCheckUnavailable
+        )));
+    }
+
+    #[tokio::test]
     async fn test_recovery_manager() {
         let mut recovery_manager = validation::RecoveryManager::new();
 

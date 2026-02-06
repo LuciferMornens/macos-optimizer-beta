@@ -145,7 +145,15 @@ impl FileMetadataCache {
     }
 
     pub async fn invalidate(&self, path: &Path) {
-        self.cache.remove(path);
+        let keys_to_remove: Vec<PathBuf> = self
+            .cache
+            .iter()
+            .filter(|entry| entry.key().starts_with(path))
+            .map(|entry| entry.key().clone())
+            .collect();
+        for key in keys_to_remove {
+            self.cache.remove(&key);
+        }
     }
 }
 

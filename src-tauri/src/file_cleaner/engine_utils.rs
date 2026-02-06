@@ -99,11 +99,16 @@ impl super::engine::FileCleaner {
         let size = if metadata.is_dir() {
             self.get_directory_size_blocking(file_path).unwrap_or(0)
         } else {
+            super::engine::FileCleaner::metadata_size_bytes(&metadata)
+        };
+        let threshold_size = if metadata.is_dir() {
+            size
+        } else {
             metadata.len()
         };
 
         if let Some(min) = min_size_bytes {
-            if size < min {
+            if threshold_size < min {
                 return None;
             }
         }

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use tokio::process::Command;
 
 /// Multi-layer safety analysis system
 pub struct SafetyAnalyzer {
@@ -405,13 +406,44 @@ impl SystemIntegrationChecker {
         }
     }
 
-    async fn check_spotlight_index(&self, _path: &Path) -> bool {
-        // In production, would use mdfind or MDQuery APIs
+    async fn check_spotlight_index(&self, path: &Path) -> bool {
+        let path_lower = path.to_string_lossy().to_lowercase();
+        if path_lower.contains("/library/caches/")
+            || path_lower.contains("/tmp/")
+            || path_lower.contains("/temporaryitems/")
+        {
+            return false;
+        }
+
+        if let Ok(output) = Command::new("mdls")
+            .arg("-name")
+            .arg("kMDItemFSName")
+            .arg(path)
+            .output()
+            .await
+        {
+            if !output.status.success() {
+                return false;
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            return stdout.contains("kmditemfsname") && !stdout.contains("(null)");
+        }
         false
     }
 
-    async fn check_time_machine_status(&self, _path: &Path) -> bool {
-        // In production, would check tmutil exclusions
+    async fn check_time_machine_status(&self, path: &Path) -> bool {
+        if let Ok(output) = Command::new("tmutil")
+            .arg("isexcluded")
+            .arg(path)
+            .output()
+            .await
+        {
+            if !output.status.success() {
+                return false;
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            return stdout.contains("[excluded]") || stdout.contains("excluded");
+        }
         false
     }
 }

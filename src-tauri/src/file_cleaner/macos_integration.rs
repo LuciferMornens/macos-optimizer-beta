@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tokio::process::Command as TokioCommand;
 
 /// macOS-specific system integration
@@ -231,38 +233,114 @@ impl LaunchServicesChecker {
 }
 
 /// Time Machine integration
-pub struct TimeMachineIntegration;
+pub struct TimeMachineIntegration {
+    cache_ttl: Duration,
+    global_state: Mutex<Option<CachedTimeMachineState>>,
+}
+
+#[derive(Clone)]
+struct CachedTimeMachineState {
+    enabled: bool,
+    last_backup: Option<String>,
+    local_snapshot_count: usize,
+    cached_at: Instant,
+}
 
 impl TimeMachineIntegration {
     pub fn new() -> Self {
-        Self
+        Self {
+            cache_ttl: Duration::from_secs(15),
+            global_state: Mutex::new(None),
+        }
     }
 
     pub async fn get_backup_status(&self, path: &Path) -> BackupStatus {
-        // Check if Time Machine is enabled
-        if !self.is_enabled().await {
+        let global_state = self.get_global_state().await;
+        if !global_state.enabled {
             return BackupStatus {
                 is_backed_up: false,
                 is_excluded: false,
-                last_backup: None,
+                last_backup: global_state.last_backup,
+                local_snapshot_count: global_state.local_snapshot_count,
+                snapshots_may_retain_space: global_state.local_snapshot_count > 0,
             };
         }
 
         // Check if path is excluded
         let is_excluded = self.is_excluded(path).await;
+        let is_backed_up = !is_excluded && global_state.last_backup.is_some();
 
         BackupStatus {
-            is_backed_up: !is_excluded,
+            is_backed_up,
             is_excluded,
-            last_backup: self.get_last_backup_time().await,
+            last_backup: global_state.last_backup,
+            local_snapshot_count: global_state.local_snapshot_count,
+            snapshots_may_retain_space: global_state.local_snapshot_count > 0,
         }
     }
 
-    async fn is_enabled(&self) -> bool {
-        if let Ok(output) = TokioCommand::new("tmutil").arg("status").output().await {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            return stdout.contains("BackupPhase");
+    async fn get_global_state(&self) -> CachedTimeMachineState {
+        if let Ok(guard) = self.global_state.lock() {
+            if let Some(cached) = guard.as_ref() {
+                if cached.cached_at.elapsed() < self.cache_ttl {
+                    return cached.clone();
+                }
+            }
         }
+
+        let enabled = self.is_enabled().await;
+        let last_backup = if enabled {
+            self.get_last_backup_time().await
+        } else {
+            None
+        };
+        let local_snapshot_count = if enabled {
+            self.get_local_snapshot_count().await.unwrap_or(0)
+        } else {
+            0
+        };
+
+        let state = CachedTimeMachineState {
+            enabled,
+            last_backup,
+            local_snapshot_count,
+            cached_at: Instant::now(),
+        };
+
+        if let Ok(mut guard) = self.global_state.lock() {
+            *guard = Some(state.clone());
+        }
+
+        state
+    }
+
+    async fn is_enabled(&self) -> bool {
+        if let Ok(output) = TokioCommand::new("tmutil")
+            .arg("destinationinfo")
+            .output()
+            .await
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+            let combined = format!("{}{}", stdout, stderr);
+            if output.status.success() && !combined.contains("no destinations configured") {
+                return true;
+            }
+            if combined.contains("no destinations configured") {
+                return false;
+            }
+        }
+
+        if let Ok(output) = TokioCommand::new("tmutil").arg("status").output().await {
+            if !output.status.success() {
+                return false;
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            return stdout.contains("backup session status")
+                || stdout.contains("clientid")
+                || stdout.contains("running");
+        }
+
         false
     }
 
@@ -273,8 +351,11 @@ impl TimeMachineIntegration {
             .output()
             .await
         {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            return stdout.contains("[Excluded]");
+            if !output.status.success() {
+                return false;
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            return stdout.contains("[excluded]") || stdout.contains("excluded");
         }
         false
     }
@@ -285,10 +366,38 @@ impl TimeMachineIntegration {
             .output()
             .await
         {
+            if !output.status.success() {
+                return None;
+            }
             let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !stdout.is_empty() {
+            let lower = stdout.to_lowercase();
+            if !stdout.is_empty()
+                && !lower.contains("no machine destinations configured")
+                && !lower.contains("no backups")
+            {
                 return Some(stdout);
             }
+        }
+        None
+    }
+
+    async fn get_local_snapshot_count(&self) -> Option<usize> {
+        if let Ok(output) = TokioCommand::new("tmutil")
+            .arg("listlocalsnapshots")
+            .arg("/")
+            .output()
+            .await
+        {
+            if !output.status.success() {
+                return None;
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let snapshot_count = stdout
+                .lines()
+                .filter(|line| line.trim().starts_with("com.apple.TimeMachine"))
+                .count();
+            return Some(snapshot_count);
         }
         None
     }
@@ -358,6 +467,8 @@ pub struct BackupStatus {
     pub is_backed_up: bool,
     pub is_excluded: bool,
     pub last_backup: Option<String>,
+    pub local_snapshot_count: usize,
+    pub snapshots_may_retain_space: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

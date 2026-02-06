@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use sysinfo::System;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
@@ -26,6 +25,15 @@ impl PreDeletionValidator {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_file_lock_checker(file_lock_checker: FileLockChecker) -> Self {
+        Self {
+            file_lock_checker,
+            dependency_checker: DependencyChecker::new(),
+            backup_verifier: BackupVerifier::new(),
+        }
+    }
+
     pub async fn validate_before_deletion(&self, files: &[CleanableFile]) -> ValidationResult {
         let mut validation_result = ValidationResult {
             is_safe: true,
@@ -35,10 +43,10 @@ impl PreDeletionValidator {
         };
 
         // Check for active file handles
-        let open_files = self.file_lock_checker.check_open_files(files).await;
-        if !open_files.is_empty() {
+        let open_file_report = self.file_lock_checker.check_open_files(files).await;
+        if !open_file_report.open_files.is_empty() {
             validation_result.is_safe = false;
-            for file in open_files {
+            for file in open_file_report.open_files {
                 validation_result.errors.push(ValidationError {
                     file_path: file.clone(),
                     error_type: ErrorType::FileInUse,
@@ -47,6 +55,32 @@ impl PreDeletionValidator {
                 validation_result
                     .file_states
                     .insert(file, FileValidationState::Blocked(BlockReason::InUse));
+            }
+        }
+        if let Some(reason) = open_file_report.degraded_reason {
+            let representative_path = files
+                .first()
+                .map(|f| PathBuf::from(&f.path))
+                .unwrap_or_else(|| PathBuf::from("/"));
+            validation_result.warnings.push(ValidationWarning {
+                file_path: representative_path,
+                warning_type: WarningType::LockCheckUnavailable,
+                message: format!(
+                    "Open-file detection degraded: {}. Manual confirmation is required for non-blocked items.",
+                    reason
+                ),
+                dependencies: None,
+            });
+            for file in files {
+                let path = PathBuf::from(&file.path);
+                match validation_result.file_states.get(&path) {
+                    Some(FileValidationState::Blocked(_)) => {}
+                    _ => {
+                        validation_result
+                            .file_states
+                            .insert(path, FileValidationState::RequiresConfirmation);
+                    }
+                }
             }
         }
 
@@ -145,78 +179,111 @@ impl PreDeletionValidator {
 
 /// Checks for file locks and open handles
 pub struct FileLockChecker {
-    lsof_available: bool,
+    lsof_program: Option<PathBuf>,
+}
+
+pub struct OpenFileCheckReport {
+    pub open_files: Vec<PathBuf>,
+    pub degraded_reason: Option<String>,
 }
 
 impl FileLockChecker {
     pub fn new() -> Self {
-        // Check if lsof is available
-        let lsof_available = std::process::Command::new("which")
-            .arg("lsof")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-
-        Self { lsof_available }
+        Self {
+            lsof_program: Self::resolve_lsof_program(),
+        }
     }
 
-    pub async fn check_open_files(&self, files: &[CleanableFile]) -> Vec<PathBuf> {
-        let mut open_files = Vec::new();
+    #[cfg(test)]
+    pub(crate) fn with_lsof_program(lsof_program: Option<PathBuf>) -> Self {
+        Self { lsof_program }
+    }
 
-        if self.lsof_available {
+    fn resolve_lsof_program() -> Option<PathBuf> {
+        // Prefer known absolute paths on macOS and keep a PATH fallback for portability.
+        let candidates = ["/usr/sbin/lsof", "/usr/bin/lsof", "lsof"];
+        for candidate in candidates {
+            if std::process::Command::new(candidate)
+                .arg("-v")
+                .output()
+                .is_ok()
+            {
+                return Some(PathBuf::from(candidate));
+            }
+        }
+        None
+    }
+
+    pub async fn check_open_files(&self, files: &[CleanableFile]) -> OpenFileCheckReport {
+        let mut open_files = Vec::new();
+        let mut degraded_reason = None;
+
+        if let Some(lsof_program) = &self.lsof_program {
             for file in files {
                 let path = PathBuf::from(&file.path);
-                if let Ok(metadata) = fs::metadata(&path) {
-                    if metadata.is_dir() {
+                match fs::metadata(&path) {
+                    Ok(metadata) => {
+                        if metadata.is_dir() {
+                            continue;
+                        }
+                    }
+                    Err(err) => {
+                        if err.kind() == std::io::ErrorKind::NotFound {
+                            continue;
+                        }
                         continue;
                     }
                 }
-                if self.is_file_open(&path).await {
-                    open_files.push(path);
+
+                match self.is_file_open(lsof_program, &path).await {
+                    Ok(true) => open_files.push(path),
+                    Ok(false) => {}
+                    Err(err) => {
+                        degraded_reason = Some(err);
+                        break;
+                    }
                 }
             }
         } else {
-            // Fallback: check using system info
-            let mut system = System::new_all();
-            system.refresh_all();
-
-            for file in files {
-                let path = PathBuf::from(&file.path);
-                if self.is_file_in_use_fallback(&path, &system) {
-                    open_files.push(path);
-                }
-            }
+            degraded_reason = Some(
+                "lsof command is unavailable on this system; open-file checks are fail-safe"
+                    .to_string(),
+            );
         }
 
-        open_files
+        OpenFileCheckReport {
+            open_files,
+            degraded_reason,
+        }
     }
 
-    async fn is_file_open(&self, path: &Path) -> bool {
-        if !self.lsof_available {
-            return false;
-        }
-
-        let mut command = Command::new("lsof");
+    async fn is_file_open(&self, lsof_program: &Path, path: &Path) -> Result<bool, String> {
+        let mut command = Command::new(lsof_program);
         command.arg(path);
         command.kill_on_drop(true);
 
         match timeout(Duration::from_secs(5), command.output()).await {
-            Ok(Ok(output)) => !output.stdout.is_empty(),
+            Ok(Ok(output)) => Ok(!output.stdout.is_empty()),
             Ok(Err(err)) => {
-                log::warn!("lsof check failed for {}: {}", path.display(), err);
-                false
+                let message = format!(
+                    "lsof check failed for {} using {}: {}",
+                    path.display(),
+                    lsof_program.display(),
+                    err
+                );
+                log::warn!("{}", message);
+                Err(message)
             }
             Err(_) => {
-                log::warn!("lsof timed out for {}", path.display());
-                false
+                let message = format!(
+                    "lsof timed out for {} using {}",
+                    path.display(),
+                    lsof_program.display()
+                );
+                log::warn!("{}", message);
+                Err(message)
             }
         }
-    }
-
-    fn is_file_in_use_fallback(&self, _path: &Path, _system: &System) -> bool {
-        // Simplified check - in production would need more sophisticated checking
-        // Using lsof is more reliable
-        false
     }
 }
 
@@ -236,10 +303,35 @@ impl BackupVerifier {
     }
 
     fn check_time_machine_status() -> bool {
+        let destination_info = std::process::Command::new("tmutil")
+            .arg("destinationinfo")
+            .output();
+        if let Ok(output) = destination_info {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
+            let combined = format!("{}{}", stdout, stderr);
+            if combined.contains("no destinations configured")
+                || combined.contains("not configured")
+            {
+                return false;
+            }
+            if output.status.success() {
+                return true;
+            }
+        }
+
         std::process::Command::new("tmutil")
             .arg("status")
             .output()
-            .map(|o| o.status.success())
+            .map(|o| {
+                if !o.status.success() {
+                    return false;
+                }
+                let stdout = String::from_utf8_lossy(&o.stdout).to_lowercase();
+                stdout.contains("backup session status")
+                    || stdout.contains("clientid")
+                    || stdout.contains("running")
+            })
             .unwrap_or(false)
     }
 
@@ -267,9 +359,12 @@ impl BackupVerifier {
             .output()
             .await
         {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            // If not excluded, it's backed up
-            return !stdout.contains("Excluded");
+            if !output.status.success() {
+                return false;
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            // If not excluded, treat as backup-eligible.
+            return !(stdout.contains("[excluded]") || stdout.contains("excluded"));
         }
 
         false
@@ -386,6 +481,7 @@ pub struct ValidationError {
 pub enum WarningType {
     HasDependencies,
     NoBackup,
+    LockCheckUnavailable,
     LargeFile,
     RecentlyModified,
 }

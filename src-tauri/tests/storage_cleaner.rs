@@ -227,3 +227,47 @@ async fn empty_trash_removes_items() {
     let trash_after = fs::read_dir(&trash_dir).expect("read trash").count();
     assert_eq!(trash_after, 0, "trash should be empty");
 }
+
+#[tokio::test]
+async fn empty_trash_invalidation_refreshes_home_aggregate_size() {
+    let _guard = acquire_env_guard();
+    let env = StorageTestEnv::new();
+    let target = env.create_file("Downloads/cache-me.crdownload", 4096);
+
+    let mut cleaner = FileCleaner::new();
+    let token = CancellationToken::new();
+    cleaner
+        .scan_system_with_cancel(&token)
+        .await
+        .expect("scan should succeed");
+    cleaner
+        .clean_files_with_cancel(vec![target.to_string_lossy().into_owned()], &token)
+        .await
+        .expect("cleanup should succeed");
+
+    // Prime cache for an ancestor directory entry.
+    let home_path = env.home().to_path_buf();
+    let home_size_before = cleaner
+        .get_directory_size_async(&home_path)
+        .await
+        .expect("home size before");
+
+    let (freed, removed) = cleaner
+        .empty_trash_with_cancel(&token)
+        .await
+        .expect("empty trash should succeed");
+    assert_eq!(removed, 1);
+    assert!(freed > 0, "trash cleanup should reclaim bytes");
+
+    // Parent size must be refreshed after trash cleanup (not served stale from cache).
+    let home_size_after = cleaner
+        .get_directory_size_async(&home_path)
+        .await
+        .expect("home size after");
+    assert!(
+        home_size_after < home_size_before,
+        "home aggregate should shrink after emptying trash (before={}, after={})",
+        home_size_before,
+        home_size_after
+    );
+}

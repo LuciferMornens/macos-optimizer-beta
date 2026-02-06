@@ -4,7 +4,10 @@ use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
+#[cfg(not(feature = "parallel-scan"))]
 use std::io::ErrorKind;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "parallel-scan")]
 use std::sync::Arc;
@@ -542,9 +545,10 @@ impl FileCleaner {
                     }
 
                     // Size filter
-                    let file_size = metadata.len();
+                    let file_size_logical = metadata.len();
+                    let file_size = Self::metadata_size_bytes(&metadata);
                     let min_size = min_size_bytes_from_rule.unwrap_or(0);
-                    if file_size < min_size {
+                    if file_size_logical < min_size {
                         continue;
                     }
 
@@ -677,6 +681,10 @@ impl FileCleaner {
         for path_str in files {
             // cooperative cancellation is injected by outer wrappers
             let path = Path::new(&path_str);
+            if !path.exists() {
+                items_removed += 1;
+                continue;
+            }
 
             // Only allow deleting items that were part of the latest scan
             let maybe_item = self.cleanable_files.iter().find(|f| f.path == path_str);
@@ -687,29 +695,14 @@ impl FileCleaner {
             let is_dir = path.is_dir();
 
             // Get size before deletion (directories need recursive sizing)
-            let item_size = if is_dir {
-                self.get_directory_size_async(path).await.unwrap_or(0)
-            } else {
-                match fs::metadata(path) {
-                    Ok(m) => m.len(),
-                    Err(e) => {
-                        if e.kind() == ErrorKind::NotFound {
-                            items_removed += 1;
-                            continue;
-                        }
-                        0
-                    }
-                }
-            };
+            let item_size = self.get_path_size_async(path).await.unwrap_or(0);
 
             // Prefer moving to Trash for safety; fallback to direct removal if needed
             match self.move_to_trash(path).await {
                 Ok(_) => {
                     total_freed += item_size;
                     items_removed += 1;
-                    if let Some(parent) = path.parent() {
-                        Self::invalidate_scan_caches(parent).await;
-                    }
+                    Self::invalidate_scan_caches(path).await;
                     continue;
                 }
                 Err(_trash_err) => {
@@ -724,9 +717,7 @@ impl FileCleaner {
                         Ok(_) => {
                             total_freed += item_size;
                             items_removed += 1;
-                            if let Some(parent) = path.parent() {
-                                Self::invalidate_scan_caches(parent).await;
-                            }
+                            Self::invalidate_scan_caches(path).await;
                         }
                         Err(e) => {
                             use std::io::ErrorKind::*;
@@ -781,9 +772,7 @@ impl FileCleaner {
                         if !path.exists() {
                             total_freed += p.size;
                             items_removed += 1;
-                            if let Some(parent) = Path::new(&p.path).parent() {
-                                Self::invalidate_scan_caches(parent).await;
-                            }
+                            Self::invalidate_scan_caches(path).await;
                         } else {
                             // Fallback check: try a final direct removal if elevation succeeded partially
                             let _ = if p.is_dir {
@@ -794,9 +783,7 @@ impl FileCleaner {
                             if !path.exists() {
                                 total_freed += p.size;
                                 items_removed += 1;
-                                if let Some(parent) = path.parent() {
-                                    Self::invalidate_scan_caches(parent).await;
-                                }
+                                Self::invalidate_scan_caches(path).await;
                             } else {
                                 errors.push(format!(
                                     "Failed to remove {} even with admin rights",
@@ -1008,7 +995,7 @@ impl FileCleaner {
         sleep(Duration::from_millis(500)).await;
 
         // Ensure cached directory sizes reflect the latest state before measuring again
-        DIR_SIZE_CACHE.invalidate(&trash_dir).await;
+        Self::invalidate_scan_caches(&trash_dir).await;
 
         // Calculate freed space
         let size_after = self.get_directory_size_async(&trash_dir).await.unwrap_or(0);
@@ -1074,7 +1061,7 @@ impl FileCleaner {
                 for entry in WalkDir::new(p).into_iter().filter_map(|e| e.ok()) {
                     if entry.file_type().is_file() {
                         if let Ok(md) = fs::metadata(entry.path()) {
-                            total += md.len();
+                            total = total.saturating_add(Self::metadata_size_bytes(&md));
                         }
                     }
                 }
@@ -1083,17 +1070,37 @@ impl FileCleaner {
             .await
     }
 
+    pub async fn get_path_size_async(&self, path: &Path) -> Result<u64, String> {
+        let metadata = fs::metadata(path).map_err(|e| format!("Failed to get metadata: {}", e))?;
+        if metadata.is_dir() {
+            self.get_directory_size_async(path).await
+        } else {
+            Ok(Self::metadata_size_bytes(&metadata))
+        }
+    }
+
     pub(crate) fn get_directory_size_blocking(&self, path: &Path) -> Result<u64, String> {
         // Synchronous calculation without touching the async runtime (safe in rayon/scan contexts)
         let mut total = 0u64;
         for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
             if entry.file_type().is_file() {
                 if let Ok(md) = fs::metadata(entry.path()) {
-                    total += md.len();
+                    total = total.saturating_add(Self::metadata_size_bytes(&md));
                 }
             }
         }
         Ok(total)
+    }
+
+    pub(crate) fn metadata_size_bytes(metadata: &fs::Metadata) -> u64 {
+        #[cfg(unix)]
+        {
+            let blocks = metadata.blocks();
+            if blocks > 0 {
+                return blocks.saturating_mul(512);
+            }
+        }
+        metadata.len()
     }
 
     pub fn get_auto_selectable_files(&self) -> Vec<CleanableFile> {
@@ -1123,10 +1130,15 @@ impl FileCleaner {
         Some(PathBuf::from(input))
     }
 
-    async fn invalidate_scan_caches(path: &Path) {
-        DIR_SIZE_CACHE.invalidate(path).await;
-        #[cfg(feature = "metadata-cache")]
-        FILE_METADATA_CACHE.invalidate(path).await;
+    pub(crate) async fn invalidate_scan_caches(path: &Path) {
+        let mut current = Some(path.to_path_buf());
+        while let Some(target) = current {
+            DIR_SIZE_CACHE.invalidate(&target).await;
+            #[cfg(feature = "metadata-cache")]
+            FILE_METADATA_CACHE.invalidate(&target).await;
+
+            current = target.parent().map(|p| p.to_path_buf());
+        }
     }
 }
 
